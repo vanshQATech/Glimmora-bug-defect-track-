@@ -27,13 +27,9 @@ app.use('/api/workspace', require('./routes/workspace'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/search', require('./routes/search'));
 
-// Serve React app in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'));
-  });
-}
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Glimmora Bug Tracker API is running' });
+});
 
 // Initialize database then start server
 async function start() {
