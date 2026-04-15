@@ -153,7 +153,13 @@ export default function ProjectDetail() {
       setImportStatus({ loading: false, result: res.data });
       fetchAll();
     } catch (err) {
-      setImportStatus({ loading: false, error: err.response?.data?.error || 'Import failed' });
+      const detail = err.response?.data?.error
+        || err.response?.statusText
+        || err.message
+        || 'Import failed';
+      const status = err.response?.status;
+      setImportStatus({ loading: false, error: status ? `[${status}] ${detail}` : detail });
+      console.error('Import error:', err);
     }
   };
 
