@@ -227,22 +227,29 @@ router.post('/:projectId/invite', authenticate, authorize('Admin', 'Project Mana
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), email.toLowerCase(), req.params.projectId, req.user.id, token);
 
-    // Send invite email
+    const appUrl = process.env.APP_URL || req.headers.origin || 'http://localhost:5173';
+    const inviteLink = `${appUrl}/register?invitation=${token}`;
+
+    // Try to send invite email (non-blocking — don't fail request if SMTP missing)
     const result = await sendInviteEmail({
       to: email.toLowerCase(),
       inviterName,
       projectName: project.name,
       token,
-    });
+    }).catch(err => ({ success: false, error: err.message }));
 
-    if (!result.success) {
-      return res.status(500).json({ error: `Invitation created but email failed: ${result.error}` });
-    }
+    const baseMessage = existingUser
+      ? `${email} has been added to the project`
+      : `Invitation created for ${email}`;
 
     res.status(201).json({
-      message: existingUser
-        ? `${email} has been added to the project and notified by email`
-        : `Invitation email sent to ${email}`,
+      message: result.success
+        ? `${baseMessage} and notified by email`
+        : `${baseMessage}. Email could not be sent — share the link below manually.`,
+      email_sent: !!result.success,
+      email_error: result.success ? null : (result.error || 'SMTP not configured'),
+      invite_link: inviteLink,
+      token,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

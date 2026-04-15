@@ -138,19 +138,26 @@ router.post('/invite', authenticate, authorize('Admin', 'Project Manager'), asyn
       }).catch(err => console.error('Email send failed:', err.message));
     }
 
-    // Send invite email (for new or existing users)
+    const appUrl = process.env.APP_URL || req.headers.origin || 'http://localhost:5173';
+    const inviteLink = `${appUrl}/register?invitation=${token}`;
+
+    // Try to send invite email (non-blocking — we still return success)
     const result = await sendInviteEmail({
       to: email.toLowerCase(),
       inviterName,
       projectName,
       token,
+    }).catch(err => ({ success: false, error: err.message }));
+
+    res.status(201).json({
+      message: result.success
+        ? 'Invitation sent successfully'
+        : 'Invitation created. Email could not be sent — share the link below manually.',
+      email_sent: !!result.success,
+      email_error: result.success ? null : (result.error || 'SMTP not configured'),
+      invite_link: inviteLink,
+      token,
     });
-
-    if (!result.success) {
-      return res.status(500).json({ error: `Invitation created but email failed: ${result.error}` });
-    }
-
-    res.status(201).json({ message: 'Invitation sent successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

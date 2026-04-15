@@ -26,15 +26,24 @@ export default function UsersPage() {
     setInviteStatus(null);
     try {
       const res = await api.post('/users/invite', { email: inviteEmail });
-      setInviteStatus({ type: 'success', message: res.data.message || 'Invitation sent successfully' });
+      setInviteStatus({
+        type: res.data.email_sent ? 'success' : 'warn',
+        message: res.data.message || 'Invitation created',
+        link: res.data.invite_link,
+      });
       setInviteEmail('');
-      setTimeout(() => { setShowInvite(false); setInviteStatus(null); }, 2000);
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Unknown error';
       setInviteStatus({ type: 'error', message: msg });
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const copyInviteLink = (link) => {
+    navigator.clipboard.writeText(link).then(() => {
+      alert('Invite link copied to clipboard');
+    });
   };
 
   const updateRole = async (userId, role) => {
@@ -76,8 +85,34 @@ export default function UsersPage() {
                 className="w-full px-4 py-2.5 border border-ink-200 rounded-lg focus:ring-2 focus:ring-brand-300 outline-none disabled:opacity-50" />
             </div>
             {inviteStatus && (
-              <div className={`text-sm px-4 py-3 rounded-lg ${inviteStatus.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                {inviteStatus.message}
+              <div className={`text-sm px-4 py-3 rounded-lg border ${
+                inviteStatus.type === 'success' ? 'bg-green-50 text-green-700 border-green-200' :
+                inviteStatus.type === 'warn' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                'bg-red-50 text-red-700 border-red-200'
+              }`}>
+                <div>{inviteStatus.message}</div>
+                {inviteStatus.link && (
+                  <div className="mt-2 space-y-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider opacity-70">Invite link</div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={inviteStatus.link}
+                        onClick={e => e.target.select()}
+                        className="flex-1 px-2 py-1.5 text-xs bg-white border border-ink-200 rounded font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyInviteLink(inviteStatus.link)}
+                        className="px-3 py-1.5 text-xs bg-brand-gradient text-white rounded font-semibold"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <div className="text-[11px] opacity-70">Share this link with the person you want to invite. It will auto-fill the registration form.</div>
+                  </div>
+                )}
               </div>
             )}
             <div className="flex gap-3 justify-end">
