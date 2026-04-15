@@ -632,6 +632,20 @@ export default function ProjectDetail() {
                     Imported <strong>{importStatus.result.created}</strong> bugs
                     {importStatus.result.skipped > 0 && <> · skipped <strong>{importStatus.result.skipped}</strong></>}
                   </div>
+                  {importStatus.result.header_map && (
+                    <div className="bg-ink-50 border border-ink-100 rounded-lg p-3 text-[11px] text-ink-600 max-h-40 overflow-y-auto">
+                      <div className="font-semibold text-ink-800 mb-1">Detected columns → mapped to</div>
+                      <ul className="space-y-0.5 font-mono">
+                        {Object.entries(importStatus.result.header_map).map(([raw, mapped]) => (
+                          <li key={raw}>
+                            <span className="text-ink-700">{raw}</span>
+                            <span className="text-ink-400"> → </span>
+                            <span className="text-brand-600">{mapped}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {importStatus.result.errors?.length > 0 && (
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 max-h-40 overflow-y-auto">
                       <div className="font-semibold mb-1">Row errors:</div>

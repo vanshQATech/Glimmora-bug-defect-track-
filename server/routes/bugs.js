@@ -17,22 +17,53 @@ const IMPORT_FIELDS = [
 const normalizeKey = (k) => String(k || '').trim().toLowerCase().replace(/[\s\-/]+/g, '_');
 
 const KEY_ALIASES = {
+  // summary
   title: 'summary',
   name: 'summary',
   bug: 'summary',
   issue: 'summary',
+  subject: 'summary',
+  bug_title: 'summary',
+  bug_name: 'summary',
+  bug_summary: 'summary',
+  issue_title: 'summary',
+  issue_summary: 'summary',
+  short_description: 'summary',
+  // description
+  long_description: 'description',
+  details: 'description',
+  bug_description: 'description',
+  issue_description: 'description',
+  // steps
   steps: 'steps_to_reproduce',
   repro: 'steps_to_reproduce',
+  reproduction_steps: 'steps_to_reproduce',
+  steps_to_reproduce_the_bug: 'steps_to_reproduce',
+  how_to_reproduce: 'steps_to_reproduce',
+  // expected / actual
   expected: 'expected_result',
+  expected_behavior: 'expected_result',
+  expected_outcome: 'expected_result',
   actual: 'actual_result',
+  actual_behavior: 'actual_result',
+  actual_outcome: 'actual_result',
+  // meta
   env: 'environment',
+  browser_version: 'browser',
+  device_type: 'device',
+  // assignee
   assignee: 'assignee_email',
   assigned_to: 'assignee_email',
+  assigned_email: 'assignee_email',
+  owner: 'assignee_email',
 };
 
 const resolveField = (raw) => {
   const k = normalizeKey(raw);
-  return KEY_ALIASES[k] || k;
+  if (KEY_ALIASES[k]) return KEY_ALIASES[k];
+  // Fuzzy fallback: any header containing "summary" or "title" maps to summary
+  if (/summary|title|subject/.test(k)) return 'summary';
+  return k;
 };
 
 function addAuditLog(db, entityType, entityId, action, field, oldVal, newVal, userId) {
@@ -373,6 +404,11 @@ router.post('/project/:projectId/import', authenticate, isProjectMember, upload.
 
     if (rawRows.length === 0) return res.status(400).json({ error: 'No rows found in file' });
 
+    // Detect original headers and how they were mapped (for debugging)
+    const detectedHeaders = Object.keys(rawRows[0] || {});
+    const headerMap = {};
+    detectedHeaders.forEach(h => { headerMap[h] = resolveField(h); });
+
     // Map raw keys to schema keys
     const rows = rawRows.map((raw) => {
       const mapped = {};
@@ -446,7 +482,7 @@ router.post('/project/:projectId/import', authenticate, isProjectMember, upload.
       }
     });
 
-    res.json(results);
+    res.json({ ...results, detected_headers: detectedHeaders, header_map: headerMap });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
