@@ -60,8 +60,8 @@ export default function Layout() {
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
     { to: '/projects', label: 'Projects', icon: FolderKanban },
     { to: '/my-work', label: 'My Work', icon: CheckSquare },
-    { to: '/workspace', label: 'Workspace', icon: Briefcase },
-    { to: '/activity', label: 'Activity', icon: Activity },
+    { to: '/workspace', label: 'Work Tracker', icon: Briefcase },
+    { to: '/activity', label: 'Daily Log', icon: Activity },
     ...(user?.role === 'Admin' ? [
       { to: '/users', label: 'Users', icon: Users },
       { to: '/database', label: 'Database', icon: Database },
