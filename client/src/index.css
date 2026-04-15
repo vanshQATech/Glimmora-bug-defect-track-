@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply antialiased font-sans text-ink-800 bg-ink-50;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  ::selection { @apply bg-brand-200 text-brand-900; }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-ink-100 rounded-xl shadow-card;
+  }
+  .card-hover {
+    @apply transition-all duration-150 hover:shadow-pop hover:-translate-y-0.5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-brand-400 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-gradient text-white shadow-card hover:shadow-pop hover:brightness-105;
+  }
+  .btn-secondary {
+    @apply btn bg-white border border-ink-200 text-ink-700 hover:bg-ink-50;
+  }
+  .btn-ghost {
+    @apply btn text-ink-600 hover:bg-ink-100;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .input {
+    @apply w-full px-3.5 py-2.5 rounded-lg border border-ink-200 bg-white text-sm text-ink-800 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition;
+  }
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wide text-ink-500 mb-1.5;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border;
+  }
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-ink-500 hover:text-brand-700 hover:bg-brand-50 transition-colors;
+  }
+  .nav-link svg {
+    @apply text-ink-400 transition-colors;
+  }
+  .nav-link:hover svg {
+    @apply text-brand-600;
+  }
+  .nav-link-active {
+    @apply bg-brand-gradient text-white shadow-card hover:bg-brand-gradient hover:text-white hover:brightness-110;
+  }
+  .nav-link-active svg,
+  .nav-link-active:hover svg {
+    @apply text-white;
+  }
+  .stat-card {
+    @apply card p-5 flex flex-col gap-1 card-hover;
+  }
+  .section-title {
+    @apply text-lg font-semibold text-ink-900 tracking-tight;
+  }
+  .page-title {
+    @apply text-2xl font-bold text-ink-900 tracking-tight;
+  }
+  .divider {
+    @apply border-t border-ink-100;
+  }
+  .skeleton {
+    @apply animate-pulse bg-ink-100 rounded-md;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d8d3c9; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #b6ae9e; border: 2px solid transparent; background-clip: padding-box; }
