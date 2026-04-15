@@ -264,16 +264,43 @@ async function initializeDatabase() {
   addCol('due_date', 'TEXT');
   addCol('qa_owner_id', 'TEXT');
 
-  // Seed admin user if none exists
-  const adminExists = db.prepare("SELECT id FROM users WHERE role = 'Admin' LIMIT 1").get();
-  if (!adminExists) {
-    const hashedPassword = bcrypt.hashSync('admin123', 10);
-    db.prepare(`
-      INSERT INTO users (id, email, password, first_name, last_name, role)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), 'admin@bugtrack.com', hashedPassword, 'System', 'Admin', 'Admin');
-    console.log('Default admin created: admin@bugtrack.com / admin123');
-  }
+  // Seed default accounts
+  const seedUser = ({ email, password, firstName, lastName, role }) => {
+    const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
+    const hashed = bcrypt.hashSync(password, 10);
+    if (existing) {
+      db.prepare(`
+        UPDATE users SET password = ?, first_name = ?, last_name = ?, role = ?, is_active = 1, updated_at = datetime('now')
+        WHERE email = ?
+      `).run(hashed, firstName, lastName, role, email);
+      console.log(`Seed user updated: ${email} (${role})`);
+    } else {
+      db.prepare(`
+        INSERT INTO users (id, email, password, first_name, last_name, role)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(uuidv4(), email, hashed, firstName, lastName, role);
+      console.log(`Seed user created: ${email} / ${password} (${role})`);
+    }
+  };
+
+  seedUser({
+    email: 'vanshqalead@glimmora.com',
+    password: 'vanshQAlead@123',
+    firstName: 'Vansh',
+    lastName: 'QA Lead',
+    role: 'Admin',
+  });
+
+  seedUser({
+    email: 'vanshqapm@glimmora.com',
+    password: 'vanshQApm@123',
+    firstName: 'Vansh',
+    lastName: 'QA PM',
+    role: 'Project Manager',
+  });
+
+  // Deactivate the old default admin if it exists
+  db.prepare("UPDATE users SET is_active = 0 WHERE email = 'admin@bugtrack.com'").run();
 
   console.log('Database initialized successfully');
   return db;
