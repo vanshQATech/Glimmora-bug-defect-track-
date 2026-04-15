@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api, { API_BASE } from '../utils/api';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { useAuth } from '../context/AuthContext';
 import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, TASK_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
@@ -141,6 +143,64 @@ export default function ProjectDetail() {
   const exportBugsXlsx = () => downloadBlob(`/bugs/project/${projectId}/export`, `bugs_${project?.name || 'project'}.xlsx`);
   const downloadImportTemplate = () => downloadBlob(`/bugs/project/${projectId}/import-template`, 'bugs_import_template.xlsx');
 
+  const exportBugsPdf = () => {
+    if (!bugs || bugs.length === 0) { alert('No bugs to export'); return; }
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const projectName = project?.name || 'Project';
+    const generatedAt = new Date().toLocaleString();
+
+    doc.setFontSize(16);
+    doc.setTextColor(40);
+    doc.text(`${projectName} — Bug Report`, 40, 40);
+    doc.setFontSize(10);
+    doc.setTextColor(120);
+    doc.text(`Generated: ${generatedAt}`, 40, 58);
+    doc.text(`Total bugs: ${bugs.length}`, 40, 72);
+
+    const rows = bugs.map(b => [
+      b.bug_number ? `#${b.bug_number}` : '—',
+      b.summary || '',
+      b.status || '',
+      b.priority || '',
+      b.severity || '',
+      b.assignee_name || '—',
+      b.reporter_name || '—',
+      b.created_at ? new Date(b.created_at).toLocaleDateString() : '',
+    ]);
+
+    autoTable(doc, {
+      head: [['ID', 'Summary', 'Status', 'Priority', 'Severity', 'Assignee', 'Reporter', 'Created']],
+      body: rows,
+      startY: 90,
+      styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
+      headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 45 },
+        1: { cellWidth: 260 },
+        2: { cellWidth: 70 },
+        3: { cellWidth: 60 },
+        4: { cellWidth: 60 },
+        5: { cellWidth: 90 },
+        6: { cellWidth: 90 },
+        7: { cellWidth: 70 },
+      },
+      didDrawPage: (data) => {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}  ·  Glimmora DefectDesk`,
+          data.settings.margin.left,
+          doc.internal.pageSize.height - 20
+        );
+      },
+    });
+
+    const safeName = projectName.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    doc.save(`bugs_${safeName}_${Date.now()}.pdf`);
+  };
+
   const handleImportFile = async (file) => {
     if (!file) return;
     const fd = new FormData();
@@ -261,6 +321,7 @@ export default function ProjectDetail() {
           {tab === 'bugs' && (
             <>
               <button onClick={exportBugsXlsx} className="btn-secondary"><Download className="w-4 h-4" /> Excel</button>
+              <button onClick={exportBugsPdf} className="btn-secondary"><Download className="w-4 h-4" /> PDF</button>
               {canManage && (
                 <button onClick={() => { setImportStatus(null); setShowImportModal(true); }} className="btn-secondary">
                   <Plus className="w-4 h-4" /> Import
