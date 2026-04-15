@@ -27,6 +27,7 @@ app.use('/api/workspace', require('./routes/workspace'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/activity', require('./routes/activity'));
+app.use('/api/admin', require('./routes/admin'));
 
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Glimmora Bug Tracker API is running' });

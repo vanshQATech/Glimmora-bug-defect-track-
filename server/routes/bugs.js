@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../database');
 const { authenticate, isProjectMember } = require('../middleware/auth');
@@ -6,6 +8,32 @@ const upload = require('../middleware/upload');
 const { sendNotificationEmail } = require('../utils/mailer');
 
 const router = express.Router();
+
+const IMPORT_FIELDS = [
+  'summary', 'description', 'steps_to_reproduce', 'expected_result', 'actual_result',
+  'url', 'status', 'priority', 'severity', 'module', 'environment', 'browser', 'device', 'due_date',
+];
+
+const normalizeKey = (k) => String(k || '').trim().toLowerCase().replace(/[\s\-/]+/g, '_');
+
+const KEY_ALIASES = {
+  title: 'summary',
+  name: 'summary',
+  bug: 'summary',
+  issue: 'summary',
+  steps: 'steps_to_reproduce',
+  repro: 'steps_to_reproduce',
+  expected: 'expected_result',
+  actual: 'actual_result',
+  env: 'environment',
+  assignee: 'assignee_email',
+  assigned_to: 'assignee_email',
+};
+
+const resolveField = (raw) => {
+  const k = normalizeKey(raw);
+  return KEY_ALIASES[k] || k;
+};
 
 function addAuditLog(db, entityType, entityId, action, field, oldVal, newVal, userId) {
   db.prepare(`
@@ -253,6 +281,176 @@ router.get('/my/assigned', authenticate, (req, res) => {
     res.json(bugs);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Export bugs to Excel (.xlsx)
+router.get('/project/:projectId/export', authenticate, isProjectMember, (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT b.bug_number, b.summary, b.description, b.steps_to_reproduce,
+        b.expected_result, b.actual_result, b.url, b.status, b.priority, b.severity,
+        b.module, b.environment, b.browser, b.device, b.due_date,
+        r.email as reporter_email, a.email as assignee_email,
+        b.created_at, b.updated_at
+      FROM bugs b
+      LEFT JOIN users r ON b.reporter_id = r.id
+      LEFT JOIN users a ON b.assignee_id = a.id
+      WHERE b.project_id = ?
+      ORDER BY b.bug_number ASC
+    `).all(req.params.projectId);
+
+    const project = db.prepare('SELECT name FROM projects WHERE id = ?').get(req.params.projectId);
+    const safeName = (project?.name || 'project').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+
+    const ws = XLSX.utils.json_to_sheet(rows, {
+      header: [
+        'bug_number', 'summary', 'description', 'steps_to_reproduce',
+        'expected_result', 'actual_result', 'url', 'status', 'priority', 'severity',
+        'module', 'environment', 'browser', 'device', 'due_date',
+        'reporter_email', 'assignee_email', 'created_at', 'updated_at',
+      ],
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bugs');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="bugs_${safeName}_${Date.now()}.xlsx"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Download import template
+router.get('/project/:projectId/import-template', authenticate, isProjectMember, (req, res) => {
+  try {
+    const sample = [{
+      summary: 'Login button unresponsive on Safari',
+      description: 'Clicking the login button does nothing on Safari 17.',
+      steps_to_reproduce: '1. Open Safari\n2. Go to /login\n3. Click Login',
+      expected_result: 'User is logged in',
+      actual_result: 'Nothing happens',
+      url: 'https://example.com/login',
+      status: 'Open',
+      priority: 'High',
+      severity: 'Major',
+      module: 'Authentication',
+      environment: 'Production',
+      browser: 'Safari 17',
+      device: 'MacBook Pro',
+      due_date: '',
+      assignee_email: '',
+    }];
+    const ws = XLSX.utils.json_to_sheet(sample);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bugs');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="bugs_import_template.xlsx"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import bugs from Excel / CSV
+router.post('/project/:projectId/import', authenticate, isProjectMember, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'File is required' });
+
+  const filePath = req.file.path;
+  try {
+    const db = getDb();
+    const { projectId } = req.params;
+
+    const wb = XLSX.readFile(filePath, { cellDates: true });
+    const sheetName = wb.SheetNames[0];
+    if (!sheetName) return res.status(400).json({ error: 'No sheets found in file' });
+    const ws = wb.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    if (rawRows.length === 0) return res.status(400).json({ error: 'No rows found in file' });
+
+    // Map raw keys to schema keys
+    const rows = rawRows.map((raw) => {
+      const mapped = {};
+      for (const [k, v] of Object.entries(raw)) {
+        const field = resolveField(k);
+        mapped[field] = typeof v === 'string' ? v.trim() : v;
+      }
+      return mapped;
+    });
+
+    const maxNumRow = db.prepare('SELECT COALESCE(MAX(bug_number), 0) as max_num FROM bugs WHERE project_id = ?').get(projectId);
+    let nextNumber = (maxNumRow?.max_num || 0) + 1;
+
+    const usersByEmail = new Map();
+    db.prepare('SELECT id, email FROM users').all().forEach(u => {
+      usersByEmail.set(String(u.email).toLowerCase(), u.id);
+    });
+
+    const results = { created: 0, skipped: 0, errors: [] };
+
+    rows.forEach((row, idx) => {
+      try {
+        if (!row.summary) {
+          results.skipped++;
+          results.errors.push({ row: idx + 2, error: 'Missing summary' });
+          return;
+        }
+
+        const assigneeEmail = (row.assignee_email || '').toLowerCase();
+        const assigneeId = assigneeEmail ? usersByEmail.get(assigneeEmail) || null : null;
+
+        const bugId = uuidv4();
+        const values = {
+          summary: row.summary,
+          description: row.description || '',
+          steps_to_reproduce: row.steps_to_reproduce || '',
+          expected_result: row.expected_result || '',
+          actual_result: row.actual_result || '',
+          url: row.url || '',
+          status: row.status || 'Open',
+          priority: row.priority || 'Medium',
+          severity: row.severity || 'Major',
+          module: row.module || null,
+          environment: row.environment || null,
+          browser: row.browser || null,
+          device: row.device || null,
+          due_date: row.due_date || null,
+        };
+
+        db.prepare(`
+          INSERT INTO bugs (
+            id, bug_number, project_id, summary, description, steps_to_reproduce,
+            expected_result, actual_result, url, reporter_id, assignee_id,
+            status, priority, severity, module, environment, browser, device, due_date
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          bugId, nextNumber, projectId,
+          values.summary, values.description, values.steps_to_reproduce,
+          values.expected_result, values.actual_result, values.url,
+          req.user.id, assigneeId,
+          values.status, values.priority, values.severity,
+          values.module, values.environment, values.browser, values.device, values.due_date
+        );
+
+        addAuditLog(db, 'bug', bugId, 'imported', null, null, null, req.user.id);
+        nextNumber++;
+        results.created++;
+      } catch (rowErr) {
+        results.skipped++;
+        results.errors.push({ row: idx + 2, error: rowErr.message });
+      }
+    });
+
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    fs.unlink(filePath, () => {});
   }
 });
 

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api, { API_BASE } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, TASK_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
@@ -34,6 +34,9 @@ export default function ProjectDetail() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteStatus, setInviteStatus] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importStatus, setImportStatus] = useState(null);
+  const importInputRef = useRef(null);
 
   const fetchAll = () => {
     api.get(`/projects/${projectId}`).then(r => setProject(r.data)).catch(() => navigate('/projects'));
@@ -118,6 +121,41 @@ export default function ProjectDetail() {
 
   const exportBugs = () => { window.open(`/api/dashboard/export/bugs?project_id=${projectId}`, '_blank'); };
   const exportTasks = () => { window.open(`/api/dashboard/export/tasks?project_id=${projectId}`, '_blank'); };
+
+  const downloadBlob = async (url, filename) => {
+    try {
+      const res = await api.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Download failed');
+    }
+  };
+
+  const exportBugsXlsx = () => downloadBlob(`/bugs/project/${projectId}/export`, `bugs_${project?.name || 'project'}.xlsx`);
+  const downloadImportTemplate = () => downloadBlob(`/bugs/project/${projectId}/import-template`, 'bugs_import_template.xlsx');
+
+  const handleImportFile = async (file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    setImportStatus({ loading: true });
+    try {
+      const res = await api.post(`/bugs/project/${projectId}/import`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportStatus({ loading: false, result: res.data });
+      fetchAll();
+    } catch (err) {
+      setImportStatus({ loading: false, error: err.response?.data?.error || 'Import failed' });
+    }
+  };
 
   const onDragStart = (e, taskId) => { e.dataTransfer.setData('taskId', taskId); };
   const onDrop = (e, status) => {
@@ -214,6 +252,16 @@ export default function ProjectDetail() {
             </div>
           )}
           <button onClick={tab === 'bugs' ? exportBugs : exportTasks} className="btn-secondary"><Download className="w-4 h-4" /> CSV</button>
+          {tab === 'bugs' && (
+            <>
+              <button onClick={exportBugsXlsx} className="btn-secondary"><Download className="w-4 h-4" /> Excel</button>
+              {canManage && (
+                <button onClick={() => { setImportStatus(null); setShowImportModal(true); }} className="btn-secondary">
+                  <Plus className="w-4 h-4" /> Import
+                </button>
+              )}
+            </>
+          )}
           <button onClick={() => tab === 'bugs' ? setShowBugModal(true) : setShowTaskModal(true)} className="btn-primary ml-auto">
             <Plus className="w-4 h-4" /> New {tab === 'bugs' ? 'Bug' : 'Task'}
           </button>
@@ -519,6 +567,83 @@ export default function ProjectDetail() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Import Bugs Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 bg-ink-900/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowImportModal(false)}>
+          <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-ink-100">
+              <h3 className="text-lg font-semibold text-ink-900">Import bugs from Excel</h3>
+              <button onClick={() => setShowImportModal(false)} className="text-ink-400 hover:text-ink-900"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-ink-600">
+                Upload an <strong>.xlsx</strong> or <strong>.csv</strong> file with your bugs.
+                The first row must contain column headers.
+              </p>
+              <div className="bg-brand-50 border border-brand-100 rounded-lg p-3 text-xs text-ink-600">
+                <div className="font-semibold text-ink-800 mb-1">Supported columns (case-insensitive)</div>
+                <code className="block text-[11px] leading-relaxed">
+                  summary* · description · steps_to_reproduce · expected_result · actual_result ·<br/>
+                  url · status · priority · severity · module · environment · browser · device · due_date · assignee_email
+                </code>
+                <div className="mt-1 text-[11px] text-ink-500">* required</div>
+              </div>
+
+              <button onClick={downloadImportTemplate} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
+                <Download className="w-3 h-3" /> Download import template
+              </button>
+
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={e => { if (e.target.files?.[0]) handleImportFile(e.target.files[0]); }}
+                className="hidden"
+              />
+
+              {!importStatus && (
+                <button onClick={() => importInputRef.current?.click()} className="btn-primary w-full">
+                  <Plus className="w-4 h-4" /> Choose file
+                </button>
+              )}
+
+              {importStatus?.loading && (
+                <div className="text-sm text-ink-600 text-center py-4">Importing…</div>
+              )}
+
+              {importStatus?.error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                  {importStatus.error}
+                </div>
+              )}
+
+              {importStatus?.result && (
+                <div className="space-y-2">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
+                    Imported <strong>{importStatus.result.created}</strong> bugs
+                    {importStatus.result.skipped > 0 && <> · skipped <strong>{importStatus.result.skipped}</strong></>}
+                  </div>
+                  {importStatus.result.errors?.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 max-h-40 overflow-y-auto">
+                      <div className="font-semibold mb-1">Row errors:</div>
+                      <ul className="space-y-0.5">
+                        {importStatus.result.errors.slice(0, 20).map((er, i) => (
+                          <li key={i}>Row {er.row}: {er.error}</li>
+                        ))}
+                        {importStatus.result.errors.length > 20 && <li>…and {importStatus.result.errors.length - 20} more</li>}
+                      </ul>
+                    </div>
+                  )}
+                  <button onClick={() => { setImportStatus(null); setShowImportModal(false); }} className="btn-primary w-full">
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

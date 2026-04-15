@@ -6,7 +6,7 @@ import Brand from './Brand';
 import AIChat from './AIChat';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, Bell, LogOut,
-  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight, Activity
+  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight, Activity, Database
 } from 'lucide-react';
 
 export default function Layout() {
@@ -62,7 +62,10 @@ export default function Layout() {
     { to: '/my-work', label: 'My Work', icon: CheckSquare },
     { to: '/workspace', label: 'Workspace', icon: Briefcase },
     { to: '/activity', label: 'Activity', icon: Activity },
-    ...(user?.role === 'Admin' ? [{ to: '/users', label: 'Users', icon: Users }] : []),
+    ...(user?.role === 'Admin' ? [
+      { to: '/users', label: 'Users', icon: Users },
+      { to: '/database', label: 'Database', icon: Database },
+    ] : []),
   ];
 
   const isActive = (item) => item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);

@@ -14,6 +14,7 @@ import Notifications from './pages/Notifications';
 import Workspace from './pages/Workspace';
 import Activity from './pages/Activity';
 import Profile from './pages/Profile';
+import DatabasePage from './pages/Database';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="workspace" element={<Workspace />} />
         <Route path="activity" element={<Activity />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="database" element={<DatabasePage />} />
         <Route path="users" element={<Users />} />
         <Route path="notifications" element={<Notifications />} />
       </Route>
