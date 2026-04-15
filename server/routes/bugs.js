@@ -75,16 +75,24 @@ function addAuditLog(db, entityType, entityId, action, field, oldVal, newVal, us
 
 function notifyUser(db, userId, type, title, message, entityType, entityId) {
   if (!userId) return;
-  db.prepare(`
-    INSERT INTO notifications (id, user_id, type, title, message, entity_type, entity_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(uuidv4(), userId, type, title, message, entityType, entityId);
+  try {
+    db.prepare(`
+      INSERT INTO notifications (id, user_id, type, title, message, entity_type, entity_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(uuidv4(), userId, type, title, message, entityType, entityId);
+  } catch (err) {
+    console.error('notifyUser insert failed:', err.message);
+  }
 
-  // Also send email
-  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
-  if (user) {
-    sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId })
-      .catch(err => console.error('Notification email failed:', err.message));
+  try {
+    const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
+    if (user) {
+      Promise.resolve(
+        sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId })
+      ).catch(err => console.error('Notification email failed:', err.message));
+    }
+  } catch (err) {
+    console.error('notifyUser email lookup failed:', err.message);
   }
 }
 
@@ -210,46 +218,50 @@ router.put('/:id', authenticate, (req, res) => {
     const existing = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Bug not found' });
 
-    const { summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, status, priority, severity } = req.body;
+    const updatable = [
+      'summary', 'description', 'steps_to_reproduce', 'expected_result', 'actual_result',
+      'url', 'assignee_id', 'status', 'priority', 'severity',
+      'module', 'environment', 'browser', 'device', 'due_date', 'qa_owner_id',
+    ];
 
-    // Track changes for audit
-    const fields = { summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, status, priority, severity };
-    for (const [key, val] of Object.entries(fields)) {
-      if (val !== undefined && val !== existing[key]) {
-        addAuditLog(db, 'bug', req.params.id, 'updated', key, existing[key], val, req.user.id);
+    const sets = [];
+    const vals = [];
+    for (const key of updatable) {
+      if (req.body[key] !== undefined) {
+        const newVal = req.body[key] === '' ? null : req.body[key];
+        if (newVal !== existing[key]) {
+          try {
+            addAuditLog(db, 'bug', req.params.id, 'updated', key, existing[key], newVal, req.user.id);
+          } catch (e) { console.error('audit log failed:', e.message); }
+        }
+        sets.push(`${key} = ?`);
+        vals.push(newVal);
       }
     }
 
-    db.prepare(`
-      UPDATE bugs SET
-        summary = COALESCE(?, summary),
-        description = COALESCE(?, description),
-        steps_to_reproduce = COALESCE(?, steps_to_reproduce),
-        expected_result = COALESCE(?, expected_result),
-        actual_result = COALESCE(?, actual_result),
-        url = COALESCE(?, url),
-        assignee_id = COALESCE(?, assignee_id),
-        status = COALESCE(?, status),
-        priority = COALESCE(?, priority),
-        severity = COALESCE(?, severity),
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).run(summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, status, priority, severity, req.params.id);
+    if (sets.length > 0) {
+      sets.push(`updated_at = datetime('now')`);
+      vals.push(req.params.id);
+      db.prepare(`UPDATE bugs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    }
 
     // Notify on assignment change
-    if (assignee_id && assignee_id !== existing.assignee_id && assignee_id !== req.user.id) {
-      notifyUser(db, assignee_id, 'bug_assigned', 'Bug Assigned', `Bug "${existing.summary}" has been assigned to you`, 'bug', req.params.id);
+    const newAssignee = req.body.assignee_id;
+    if (newAssignee && newAssignee !== existing.assignee_id && newAssignee !== req.user.id) {
+      notifyUser(db, newAssignee, 'bug_assigned', 'Bug Assigned', `Bug "${existing.summary}" has been assigned to you`, 'bug', req.params.id);
     }
 
     // Notify on status change
-    if (status && status !== existing.status && existing.reporter_id !== req.user.id) {
-      notifyUser(db, existing.reporter_id, 'status_change', 'Bug Status Updated', `Bug "${existing.summary}" status changed to ${status}`, 'bug', req.params.id);
+    const newStatus = req.body.status;
+    if (newStatus && newStatus !== existing.status && existing.reporter_id !== req.user.id) {
+      notifyUser(db, existing.reporter_id, 'status_change', 'Bug Status Updated', `Bug "${existing.summary}" status changed to ${newStatus}`, 'bug', req.params.id);
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
     res.json(bug);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('PUT /bugs/:id error:', err);
+    res.status(500).json({ error: err.message || 'Failed to update bug' });
   }
 });
 

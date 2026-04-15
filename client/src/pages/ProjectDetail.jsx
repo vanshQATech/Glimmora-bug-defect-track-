@@ -114,7 +114,12 @@ export default function ProjectDetail() {
   };
   const updateBugAssignee = async (bugId, assignee_id) => {
     try { await api.put(`/bugs/${bugId}`, { assignee_id: assignee_id || null }); fetchAll(); }
-    catch (err) { alert(err.response?.data?.error || 'Failed'); }
+    catch (err) {
+      const msg = err.response?.data?.error || err.response?.statusText || err.message || 'Failed';
+      const status = err.response?.status ? `[${err.response.status}] ` : '';
+      alert(`${status}${msg}`);
+      console.error('updateBugAssignee error:', err);
+    }
   };
   const updateTaskStatus = async (taskId, status) => {
     try { await api.put(`/tasks/${taskId}`, { status }); fetchAll(); }
