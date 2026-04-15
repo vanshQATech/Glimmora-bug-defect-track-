@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api, { API_BASE } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
@@ -116,10 +116,10 @@ export default function BugDetail() {
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {bug.attachments?.map(a => (
-                  <a key={a.id} href={`/api/uploads/${a.filename}`} target="_blank" rel="noopener noreferrer"
+                  <a key={a.id} href={`${API_BASE}/uploads/${a.filename}`} target="_blank" rel="noopener noreferrer"
                     className="block rounded-xl overflow-hidden border border-ink-100 hover:shadow-pop hover:-translate-y-0.5 transition-all">
                     {a.mimetype?.startsWith('image/') ? (
-                      <img src={`/api/uploads/${a.filename}`} alt={a.original_name} className="w-full h-32 object-cover" />
+                      <img src={`${API_BASE}/uploads/${a.filename}`} alt={a.original_name} className="w-full h-32 object-cover" />
                     ) : (
                       <div className="w-full h-32 bg-brand-50 flex items-center justify-center">
                         <Paperclip className="w-10 h-10 text-brand-400" />
