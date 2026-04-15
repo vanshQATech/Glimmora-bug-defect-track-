@@ -5,8 +5,90 @@ const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 
 const DB_PATH = path.join(__dirname, 'bugtracker.db');
+const SNAPSHOT_INTERVAL_MS = 3000;
 
 let db;
+let pgPool = null;
+let saveTimer = null;
+let pendingSave = false;
+
+async function getPgPool() {
+  if (pgPool) return pgPool;
+  if (!process.env.DATABASE_URL) return null;
+  const { Pool } = require('pg');
+  pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS db_snapshot (
+      id INTEGER PRIMARY KEY,
+      data BYTEA NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  return pgPool;
+}
+
+async function loadSnapshotFromPg() {
+  const pool = await getPgPool();
+  if (!pool) return null;
+  try {
+    const res = await pool.query('SELECT data FROM db_snapshot WHERE id = 1');
+    if (res.rows.length === 0) return null;
+    console.log('Loaded DB snapshot from Postgres');
+    return res.rows[0].data;
+  } catch (err) {
+    console.error('Failed to load DB snapshot from Postgres:', err.message);
+    return null;
+  }
+}
+
+async function saveSnapshotToPg(buffer) {
+  const pool = await getPgPool();
+  if (!pool) return;
+  try {
+    await pool.query(
+      `INSERT INTO db_snapshot (id, data, updated_at) VALUES (1, $1, NOW())
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+      [buffer]
+    );
+  } catch (err) {
+    console.error('Failed to save DB snapshot to Postgres:', err.message);
+  }
+}
+
+function scheduleSnapshot() {
+  if (!process.env.DATABASE_URL) return;
+  pendingSave = true;
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    if (!pendingSave || !db) return;
+    pendingSave = false;
+    try {
+      const data = db._db.export();
+      await saveSnapshotToPg(Buffer.from(data));
+    } catch (err) {
+      console.error('Snapshot flush failed:', err.message);
+    }
+  }, SNAPSHOT_INTERVAL_MS);
+}
+
+async function flushSnapshotNow() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  if (!db) return;
+  try {
+    const data = db._db.export();
+    await saveSnapshotToPg(Buffer.from(data));
+    console.log('Final DB snapshot flushed to Postgres');
+  } catch (err) {
+    console.error('Final snapshot flush failed:', err.message);
+  }
+}
+
+process.on('SIGTERM', async () => { await flushSnapshotNow(); process.exit(0); });
+process.on('SIGINT', async () => { await flushSnapshotNow(); process.exit(0); });
 
 // sql.js wrapper to match better-sqlite3 API style
 class DbWrapper {
@@ -56,9 +138,14 @@ class DbWrapper {
   }
 
   _save() {
-    const data = this._db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(DB_PATH, buffer);
+    try {
+      const data = this._db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(DB_PATH, buffer);
+    } catch (err) {
+      // Render's FS may be read-only in some dirs; ignore and rely on Postgres snapshot
+    }
+    scheduleSnapshot();
   }
 }
 
@@ -72,12 +159,18 @@ function getDb() {
 async function initializeDatabase() {
   const SQL = await initSqlJs();
 
+  // Prefer Postgres snapshot (persistent across redeploys), then local file, else empty.
   let sqlDb;
-  if (fs.existsSync(DB_PATH)) {
+  const pgBuffer = await loadSnapshotFromPg();
+  if (pgBuffer) {
+    sqlDb = new SQL.Database(pgBuffer);
+  } else if (fs.existsSync(DB_PATH)) {
     const fileBuffer = fs.readFileSync(DB_PATH);
     sqlDb = new SQL.Database(fileBuffer);
+    console.log('Loaded DB from local file (no Postgres snapshot yet)');
   } else {
     sqlDb = new SQL.Database();
+    console.log('Created fresh empty DB');
   }
 
   db = new DbWrapper(sqlDb);
@@ -301,6 +394,9 @@ async function initializeDatabase() {
 
   // Deactivate the old default admin if it exists
   db.prepare("UPDATE users SET is_active = 0 WHERE email = 'admin@bugtrack.com'").run();
+
+  // Force immediate initial snapshot so schema + seed data land in Postgres
+  await flushSnapshotNow();
 
   console.log('Database initialized successfully');
   return db;
