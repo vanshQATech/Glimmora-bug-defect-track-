@@ -12,6 +12,8 @@ import MyWork from './pages/MyWork';
 import Users from './pages/Users';
 import Notifications from './pages/Notifications';
 import Workspace from './pages/Workspace';
+import Activity from './pages/Activity';
+import Profile from './pages/Profile';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -34,6 +36,8 @@ export default function App() {
         <Route path="tasks/:taskId" element={<TaskDetail />} />
         <Route path="my-work" element={<MyWork />} />
         <Route path="workspace" element={<Workspace />} />
+        <Route path="activity" element={<Activity />} />
+        <Route path="profile" element={<Profile />} />
         <Route path="users" element={<Users />} />
         <Route path="notifications" element={<Notifications />} />
       </Route>

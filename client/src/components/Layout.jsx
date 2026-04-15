@@ -6,7 +6,7 @@ import Brand from './Brand';
 import AIChat from './AIChat';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, Bell, LogOut,
-  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight
+  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight, Activity
 } from 'lucide-react';
 
 export default function Layout() {
@@ -61,6 +61,7 @@ export default function Layout() {
     { to: '/projects', label: 'Projects', icon: FolderKanban },
     { to: '/my-work', label: 'My Work', icon: CheckSquare },
     { to: '/workspace', label: 'Workspace', icon: Briefcase },
+    { to: '/activity', label: 'Activity', icon: Activity },
     ...(user?.role === 'Admin' ? [{ to: '/users', label: 'Users', icon: Users }] : []),
   ];
 
@@ -106,7 +107,12 @@ export default function Layout() {
         </nav>
 
         <div className="p-3 border-t border-ink-100">
-          <div className={`flex items-center gap-3 p-2 rounded-lg hover:bg-ink-50 ${collapsed ? 'justify-center' : ''}`}>
+          <Link
+            to="/profile"
+            onClick={() => setMobileOpen(false)}
+            title={collapsed ? `${user?.first_name || ''} ${user?.last_name || ''}`.trim() : ''}
+            className={`flex items-center gap-3 p-2 rounded-lg hover:bg-ink-50 transition-colors ${collapsed ? 'justify-center' : ''} ${location.pathname === '/profile' ? 'bg-ink-50' : ''}`}
+          >
             <div className="w-9 h-9 rounded-full bg-brand-gradient text-white flex items-center justify-center text-sm font-bold shadow-card flex-shrink-0">
               {initials || 'U'}
             </div>
@@ -116,7 +122,7 @@ export default function Layout() {
                 <p className="text-xs text-brand-600 truncate font-medium">{user?.role}</p>
               </div>
             )}
-          </div>
+          </Link>
           <button
             onClick={() => setCollapsed(c => !c)}
             className="hidden lg:flex mt-2 w-full items-center justify-center gap-2 py-1.5 rounded-lg text-xs text-ink-400 hover:bg-ink-50 hover:text-ink-700"

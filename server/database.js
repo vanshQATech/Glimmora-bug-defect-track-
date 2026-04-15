@@ -229,6 +229,25 @@ async function initializeDatabase() {
       update_date TEXT NOT NULL DEFAULT (date('now')),
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS activity_updates (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT,
+      update_date TEXT NOT NULL DEFAULT (date('now')),
+      module TEXT,
+      tasks_completed TEXT,
+      tasks_in_progress TEXT,
+      tasks_planned TEXT,
+      bugs_worked TEXT,
+      bugs_fixed TEXT,
+      bugs_raised TEXT,
+      blockers TEXT,
+      dependencies TEXT,
+      status TEXT NOT NULL DEFAULT 'In Progress',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Lightweight migrations for new bug fields
