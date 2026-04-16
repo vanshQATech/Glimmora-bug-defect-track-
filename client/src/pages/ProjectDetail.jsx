@@ -26,6 +26,7 @@ export default function ProjectDetail() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
+  const [filterAssignee, setFilterAssignee] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
@@ -42,12 +43,12 @@ export default function ProjectDetail() {
 
   const fetchAll = () => {
     api.get(`/projects/${projectId}`).then(r => setProject(r.data)).catch(() => navigate('/projects'));
-    api.get(`/bugs/project/${projectId}`, { params: { search, status: filterStatus, priority: filterPriority } }).then(r => setBugs(r.data));
+    api.get(`/bugs/project/${projectId}`, { params: { search, status: filterStatus, priority: filterPriority, assignee_id: filterAssignee } }).then(r => setBugs(r.data));
     api.get(`/tasks/project/${projectId}`, { params: { search, status: filterStatus, priority: filterPriority } }).then(r => setTasks(r.data));
     api.get('/users').then(r => setAllUsers(r.data));
   };
 
-  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search, filterStatus, filterPriority]);
+  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search, filterStatus, filterPriority, filterAssignee]);
 
   const createBug = async (e) => {
     e.preventDefault();
@@ -292,7 +293,7 @@ export default function ProjectDetail() {
         ].map(t => {
           const Icon = t.icon;
           return (
-            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatus(''); setFilterPriority(''); }}
+            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatus(''); setFilterPriority(''); setFilterAssignee(''); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.id ? 'bg-brand-gradient text-white shadow-card' : 'text-ink-600 hover:bg-ink-50'}`}>
               <Icon className="w-4 h-4" /> {t.label}
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab === t.id ? 'bg-white/20' : 'bg-ink-100'}`}>{t.count}</span>
@@ -316,6 +317,12 @@ export default function ProjectDetail() {
             <option value="">All Priorities</option>
             {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
+          {tab === 'bugs' && (
+            <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input w-auto">
+              <option value="">All Assignees</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+            </select>
+          )}
           {tab === 'tasks' && (
             <div className="flex items-center gap-1 p-0.5 bg-ink-100 rounded-lg ml-1">
               <button onClick={() => setTaskView('board')} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium ${taskView === 'board' ? 'bg-white text-ink-900 shadow-card' : 'text-ink-500'}`}><Layers className="w-3.5 h-3.5" /> Board</button>

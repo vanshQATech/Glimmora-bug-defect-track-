@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Brand from '../components/Brand';
 import { Eye, EyeOff, ArrowRight, Shield, Zap, Users } from 'lucide-react';
@@ -12,12 +12,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try { await login(email, password); navigate('/'); }
+    try { await login(email, password); navigate(location.state?.from || '/'); }
     catch (err) { setError(err.response?.data?.error || 'Login failed'); }
     finally { setLoading(false); }
   };

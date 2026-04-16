@@ -132,6 +132,24 @@ router.get('/project/:projectId', authenticate, isProjectMember, (req, res) => {
   }
 });
 
+// Get all bugs assigned to current user (must be before /:id to avoid matching "my" as an id)
+router.get('/my/assigned', authenticate, (req, res) => {
+  try {
+    const bugs = getDb().prepare(`
+      SELECT b.*, p.name as project_name,
+        r.first_name || ' ' || r.last_name as reporter_name
+      FROM bugs b
+      LEFT JOIN projects p ON b.project_id = p.id
+      LEFT JOIN users r ON b.reporter_id = r.id
+      WHERE b.assignee_id = ?
+      ORDER BY b.updated_at DESC
+    `).all(req.user.id);
+    res.json(bugs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get single bug
 router.get('/:id', authenticate, (req, res) => {
   try {
@@ -304,24 +322,6 @@ router.post('/:id/comments', authenticate, (req, res) => {
     `).get(commentId);
 
     res.status(201).json(comment);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get all bugs assigned to current user
-router.get('/my/assigned', authenticate, (req, res) => {
-  try {
-    const bugs = getDb().prepare(`
-      SELECT b.*, p.name as project_name,
-        r.first_name || ' ' || r.last_name as reporter_name
-      FROM bugs b
-      LEFT JOIN projects p ON b.project_id = p.id
-      LEFT JOIN users r ON b.reporter_id = r.id
-      WHERE b.assignee_id = ?
-      ORDER BY b.updated_at DESC
-    `).all(req.user.id);
-    res.json(bugs);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

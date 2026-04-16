@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -18,8 +18,9 @@ import DatabasePage from './pages/Database';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
-  return user ? children : <Navigate to="/login" />;
+  return user ? children : <Navigate to="/login" state={{ from: location.pathname }} />;
 }
 
 export default function App() {
