@@ -6,7 +6,7 @@ import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   ArrowLeft, Paperclip, MessageSquare, Send, FileDown, ExternalLink,
-  Calendar, User, Bug as BugIcon, Activity, Clock
+  Calendar, User, Bug as BugIcon, Activity, Clock, Plus
 } from 'lucide-react';
 
 export default function BugDetail() {
@@ -44,6 +44,18 @@ export default function BugDetail() {
     if (!comment.trim()) return;
     try { await api.post(`/bugs/${bugId}/comments`, { content: comment }); setComment(''); fetchBug(); }
     catch (err) { alert(err.response?.data?.error || 'Failed'); }
+  };
+
+  const uploadAttachments = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    const formData = new FormData();
+    files.forEach(f => formData.append('attachments', f));
+    try {
+      await api.post(`/bugs/${bugId}/attachments`, formData);
+      fetchBug();
+    } catch (err) { alert(err.response?.data?.error || 'Upload failed'); }
+    e.target.value = '';
   };
 
   const downloadPdf = () => {
@@ -110,6 +122,10 @@ export default function BugDetail() {
           <div className="card p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="section-title flex items-center gap-2"><Paperclip className="w-4 h-4 text-brand-600" /> Attachments <span className="text-ink-400 font-normal">({bug.attachments?.length || 0})</span></h3>
+              <label className="btn-ghost p-2 cursor-pointer flex items-center gap-1 text-xs">
+                <Plus className="w-4 h-4" /> Add Files
+                <input type="file" multiple className="hidden" onChange={uploadAttachments} />
+              </label>
             </div>
             {bug.attachments?.length === 0 ? (
               <p className="text-sm text-ink-400 italic">No files attached.</p>

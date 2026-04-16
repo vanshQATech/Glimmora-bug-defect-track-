@@ -187,7 +187,7 @@ router.get('/:id', authenticate, (req, res) => {
 });
 
 // Create bug
-router.post('/', authenticate, upload.array('attachments', 5), (req, res) => {
+router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
     const { project_id, summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, priority, severity } = req.body;
 
@@ -284,7 +284,7 @@ router.put('/:id', authenticate, (req, res) => {
 });
 
 // Upload attachment to existing bug
-router.post('/:id/attachments', authenticate, upload.array('attachments', 5), (req, res) => {
+router.post('/:id/attachments', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
     const db = getDb();
     const attachments = [];
