@@ -12,13 +12,19 @@ router.get('/stats', authenticate, (req, res) => {
     const bugStats = db.prepare(`
       SELECT
         COUNT(*) as total,
+        SUM(CASE WHEN status = 'New' THEN 1 ELSE 0 END) as new_count,
         SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open,
         SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
-        SUM(CASE WHEN status = 'Done' THEN 1 ELSE 0 END) as done,
-        SUM(CASE WHEN status NOT IN ('Done','Ready for Deployment') THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN priority = 'Critical' AND status != 'Done' THEN 1 ELSE 0 END) as critical
+        SUM(CASE WHEN status = 'Fixed' THEN 1 ELSE 0 END) as fixed,
+        SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'Approved by PM' THEN 1 ELSE 0 END) as done,
+        SUM(CASE WHEN status != 'Approved by PM' THEN 1 ELSE 0 END) as active,
+        SUM(CASE WHEN priority = 'Critical' AND status != 'Approved by PM' THEN 1 ELSE 0 END) as critical
       FROM bugs
     `).get();
+
+    const statusRows = db.prepare('SELECT status, COUNT(*) as count FROM bugs GROUP BY status').all();
+    const statusBreakdown = Object.fromEntries(statusRows.map(r => [r.status, r.count]));
 
     const taskStats = db.prepare(`
       SELECT
@@ -35,7 +41,7 @@ router.get('/stats', authenticate, (req, res) => {
     const userCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get();
 
     // My work
-    const myBugs = db.prepare('SELECT COUNT(*) as count FROM bugs WHERE assignee_id = ? AND status != ?').get(req.user.id, 'Done');
+    const myBugs = db.prepare('SELECT COUNT(*) as count FROM bugs WHERE assignee_id = ? AND status != ?').get(req.user.id, 'Approved by PM');
     const myTasks = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE assignee_id = ? AND status != ?').get(req.user.id, 'Done');
 
     // Recent activity
@@ -47,6 +53,7 @@ router.get('/stats', authenticate, (req, res) => {
 
     res.json({
       bugs: bugStats,
+      statusBreakdown,
       tasks: taskStats,
       projects: projectCount.count,
       users: userCount.count,
