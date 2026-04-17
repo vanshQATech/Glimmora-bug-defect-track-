@@ -8,22 +8,22 @@ import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, TASK_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   Plus, Bug, CheckSquare, Users, Search, Download, ArrowLeft, UserPlus, Mail,
-  X, Layers, List, Calendar, FolderKanban, Trash2
+  X, Layers, List, Calendar, FolderKanban, Trash2, BarChart3
 } from 'lucide-react';
 
 const KANBAN_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed'];
 
-const STATUS_BAR_COLORS = {
-  'New':                        'from-slate-400 to-slate-500',
-  'Open':                       'from-blue-400 to-blue-500',
-  'In Progress':                'from-amber-400 to-amber-500',
-  'Fixed':                      'from-teal-400 to-teal-500',
-  'Under Deployment':           'from-cyan-400 to-cyan-500',
-  'Failed':                     'from-red-400 to-red-500',
-  'Ready for Testing':          'from-purple-400 to-purple-500',
-  'Checked by QA':              'from-emerald-400 to-emerald-500',
-  'Checked by Project Manager': 'from-green-400 to-green-500',
-  'Approved by PM':             'from-brand-400 to-brand-600',
+const STATUS_PALETTE = {
+  'New':                        { grad: 'from-slate-300 to-slate-500',     dot: 'bg-slate-500',   text: 'text-slate-700' },
+  'Open':                       { grad: 'from-blue-300 to-blue-500',       dot: 'bg-blue-500',    text: 'text-blue-700' },
+  'In Progress':                { grad: 'from-amber-300 to-amber-500',     dot: 'bg-amber-500',   text: 'text-amber-700' },
+  'Fixed':                      { grad: 'from-teal-300 to-teal-500',       dot: 'bg-teal-500',    text: 'text-teal-700' },
+  'Under Deployment':           { grad: 'from-cyan-300 to-cyan-500',       dot: 'bg-cyan-500',    text: 'text-cyan-700' },
+  'Failed':                     { grad: 'from-red-300 to-red-500',         dot: 'bg-red-500',     text: 'text-red-700' },
+  'Ready for Testing':          { grad: 'from-purple-300 to-purple-500',   dot: 'bg-purple-500',  text: 'text-purple-700' },
+  'Checked by QA':              { grad: 'from-emerald-300 to-emerald-500', dot: 'bg-emerald-500', text: 'text-emerald-700' },
+  'Checked by Project Manager': { grad: 'from-green-300 to-green-500',     dot: 'bg-green-500',   text: 'text-green-700' },
+  'Approved by PM':             { grad: 'from-brand-300 to-brand-600',     dot: 'bg-brand-600',   text: 'text-brand-700' },
 };
 
 function BugStatusChart({ bugs }) {
@@ -32,48 +32,89 @@ function BugStatusChart({ bugs }) {
     acc[s] = bugs.filter(b => b.status === s).length;
     return acc;
   }, {});
-  const max = Math.max(1, ...Object.values(counts));
-  const CHART_H = 180;
+  const rawMax = Math.max(...Object.values(counts), 1);
+  const niceMax = rawMax <= 5 ? 5 : Math.ceil(rawMax / 5) * 5;
+  const gridlines = [niceMax, Math.round(niceMax * 0.75), Math.round(niceMax * 0.5), Math.round(niceMax * 0.25), 0];
+  const CHART_H = 220;
 
   return (
-    <div className="relative mt-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-sm font-semibold text-ink-800">Bug Status Overview</h3>
-          <p className="text-xs text-ink-500 mt-0.5">Distribution across workflow stages</p>
+    <div className="mt-6 rounded-2xl border border-ink-100 bg-gradient-to-br from-white via-ink-50/30 to-brand-50/20 p-5 shadow-card">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 flex-wrap mb-5">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-brand-gradient flex items-center justify-center shadow-card">
+            <BarChart3 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-ink-900">Bug Status Overview</h3>
+            <p className="text-xs text-ink-500">Distribution across workflow stages</p>
+          </div>
         </div>
-        <div className="flex items-baseline gap-1.5 bg-brand-50 border border-brand-200 rounded-xl px-4 py-2">
-          <span className="text-2xl font-bold text-brand-700">{total}</span>
-          <span className="text-[11px] uppercase tracking-wide text-brand-600 font-semibold">Total Bugs</span>
+        <div className="flex items-center gap-3 rounded-xl bg-brand-gradient px-5 py-2.5 shadow-card">
+          <div className="text-[10px] uppercase tracking-widest text-white/80 font-semibold">Total</div>
+          <div className="text-3xl font-bold text-white leading-none">{total}</div>
         </div>
       </div>
 
-      <div className="relative">
-        <div className="flex items-end justify-between gap-2 overflow-x-auto pb-2" style={{ height: CHART_H + 60 }}>
-          {BUG_STATUSES.map(s => {
-            const val = counts[s];
-            const pct = max > 0 ? (val / max) * 100 : 0;
-            const color = STATUS_BAR_COLORS[s] || 'from-ink-300 to-ink-400';
-            return (
-              <div key={s} className="flex-1 min-w-[60px] flex flex-col items-center">
-                <div className="text-xs font-bold text-ink-900 mb-1">{val}</div>
-                <div
-                  className="w-full flex items-end justify-center"
-                  style={{ height: CHART_H }}
-                >
+      {/* Chart */}
+      <div className="flex gap-3" style={{ height: CHART_H + 12 }}>
+        {/* Y-axis labels */}
+        <div className="flex flex-col justify-between text-[10px] text-ink-400 font-medium py-1 pr-1 w-6 text-right">
+          {gridlines.map(g => <div key={g}>{g}</div>)}
+        </div>
+
+        {/* Plot area */}
+        <div className="relative flex-1">
+          {/* Gridlines */}
+          <div className="absolute inset-0 flex flex-col justify-between py-1">
+            {gridlines.map((_, i) => (
+              <div
+                key={i}
+                className={`border-t ${i === gridlines.length - 1 ? 'border-ink-200' : 'border-dashed border-ink-100'}`}
+              />
+            ))}
+          </div>
+
+          {/* Bars */}
+          <div className="absolute inset-0 flex items-end justify-between gap-1.5 py-1">
+            {BUG_STATUSES.map(s => {
+              const val = counts[s];
+              const pct = niceMax > 0 ? (val / niceMax) * 100 : 0;
+              const { grad } = STATUS_PALETTE[s] || { grad: 'from-ink-300 to-ink-500' };
+              return (
+                <div key={s} className="group relative flex-1 h-full flex flex-col items-center justify-end">
+                  {/* tooltip */}
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 -translate-y-full opacity-0 group-hover:opacity-100 transition-opacity bg-ink-900 text-white text-[10px] font-medium px-2 py-1 rounded-md whitespace-nowrap z-10 pointer-events-none shadow-pop">
+                    {s}: <span className="font-bold">{val}</span>
+                  </div>
+                  {/* count label */}
+                  {val > 0 && (
+                    <div className="text-[11px] font-bold text-ink-900 mb-1 tabular-nums">{val}</div>
+                  )}
+                  {/* bar */}
                   <div
-                    className={`w-full rounded-t-lg bg-gradient-to-t ${color} shadow-sm transition-all duration-500`}
-                    style={{ height: `${Math.max(pct, val > 0 ? 4 : 0)}%` }}
-                    title={`${s}: ${val}`}
+                    className={`w-full max-w-[44px] rounded-t-lg bg-gradient-to-t ${grad} shadow-sm group-hover:shadow-pop group-hover:-translate-y-0.5 transition-all duration-300`}
+                    style={{ height: val > 0 ? `${Math.max(pct, 3)}%` : '2px', opacity: val > 0 ? 1 : 0.25 }}
                   />
                 </div>
-                <div className="mt-2 text-[10px] text-ink-600 font-medium text-center leading-tight min-h-[28px] flex items-center">
-                  {s}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
+      </div>
+
+      {/* Legend */}
+      <div className="mt-5 pt-4 border-t border-ink-100 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-x-4 gap-y-2">
+        {BUG_STATUSES.map(s => {
+          const { dot, text } = STATUS_PALETTE[s] || { dot: 'bg-ink-400', text: 'text-ink-700' };
+          return (
+            <div key={s} className="flex items-center gap-2 min-w-0">
+              <span className={`w-2 h-2 rounded-full ${dot} flex-shrink-0`} />
+              <span className="text-[11px] text-ink-600 font-medium truncate flex-1" title={s}>{s}</span>
+              <span className={`text-[11px] font-bold ${text} tabular-nums`}>{counts[s]}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
