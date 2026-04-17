@@ -33,33 +33,47 @@ function BugStatusChart({ bugs }) {
     return acc;
   }, {});
   const max = Math.max(1, ...Object.values(counts));
+  const CHART_H = 180;
 
   return (
     <div className="relative mt-6">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-ink-800">Bug Status Overview</h3>
-        <span className="chip bg-brand-50 text-brand-700 border-brand-200">{total} total</span>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-800">Bug Status Overview</h3>
+          <p className="text-xs text-ink-500 mt-0.5">Distribution across workflow stages</p>
+        </div>
+        <div className="flex items-baseline gap-1.5 bg-brand-50 border border-brand-200 rounded-xl px-4 py-2">
+          <span className="text-2xl font-bold text-brand-700">{total}</span>
+          <span className="text-[11px] uppercase tracking-wide text-brand-600 font-semibold">Total Bugs</span>
+        </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5">
-        {BUG_STATUSES.map(s => {
-          const val = counts[s];
-          const pct = max > 0 ? (val / max) * 100 : 0;
-          const color = STATUS_BAR_COLORS[s] || 'from-ink-300 to-ink-400';
-          return (
-            <div key={s}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-ink-700">{s}</span>
-                <span className="text-xs font-semibold text-ink-900">{val}</span>
-              </div>
-              <div className="h-2 bg-ink-100 rounded-full overflow-hidden">
+
+      <div className="relative">
+        <div className="flex items-end justify-between gap-2 overflow-x-auto pb-2" style={{ height: CHART_H + 60 }}>
+          {BUG_STATUSES.map(s => {
+            const val = counts[s];
+            const pct = max > 0 ? (val / max) * 100 : 0;
+            const color = STATUS_BAR_COLORS[s] || 'from-ink-300 to-ink-400';
+            return (
+              <div key={s} className="flex-1 min-w-[60px] flex flex-col items-center">
+                <div className="text-xs font-bold text-ink-900 mb-1">{val}</div>
                 <div
-                  className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500`}
-                  style={{ width: `${pct}%` }}
-                />
+                  className="w-full flex items-end justify-center"
+                  style={{ height: CHART_H }}
+                >
+                  <div
+                    className={`w-full rounded-t-lg bg-gradient-to-t ${color} shadow-sm transition-all duration-500`}
+                    style={{ height: `${Math.max(pct, val > 0 ? 4 : 0)}%` }}
+                    title={`${s}: ${val}`}
+                  />
+                </div>
+                <div className="mt-2 text-[10px] text-ink-600 font-medium text-center leading-tight min-h-[28px] flex items-center">
+                  {s}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
