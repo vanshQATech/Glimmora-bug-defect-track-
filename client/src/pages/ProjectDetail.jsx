@@ -13,6 +13,58 @@ import {
 
 const KANBAN_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed'];
 
+const STATUS_BAR_COLORS = {
+  'New':                        'from-slate-400 to-slate-500',
+  'Open':                       'from-blue-400 to-blue-500',
+  'In Progress':                'from-amber-400 to-amber-500',
+  'Fixed':                      'from-teal-400 to-teal-500',
+  'Under Deployment':           'from-cyan-400 to-cyan-500',
+  'Failed':                     'from-red-400 to-red-500',
+  'Ready for Testing':          'from-purple-400 to-purple-500',
+  'Checked by QA':              'from-emerald-400 to-emerald-500',
+  'Checked by Project Manager': 'from-green-400 to-green-500',
+  'Approved by PM':             'from-brand-400 to-brand-600',
+};
+
+function BugStatusChart({ bugs }) {
+  const total = bugs.length;
+  const counts = BUG_STATUSES.reduce((acc, s) => {
+    acc[s] = bugs.filter(b => b.status === s).length;
+    return acc;
+  }, {});
+  const max = Math.max(1, ...Object.values(counts));
+
+  return (
+    <div className="relative mt-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-ink-800">Bug Status Overview</h3>
+        <span className="chip bg-brand-50 text-brand-700 border-brand-200">{total} total</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5">
+        {BUG_STATUSES.map(s => {
+          const val = counts[s];
+          const pct = max > 0 ? (val / max) * 100 : 0;
+          const color = STATUS_BAR_COLORS[s] || 'from-ink-300 to-ink-400';
+          return (
+            <div key={s}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-ink-700">{s}</span>
+                <span className="text-xs font-semibold text-ink-900">{val}</span>
+              </div>
+              <div className="h-2 bg-ink-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectDetail() {
   const { projectId } = useParams();
   const { user } = useAuth();
@@ -268,20 +320,7 @@ export default function ProjectDetail() {
           )}
         </div>
 
-        <div className="relative grid grid-cols-2 md:grid-cols-5 gap-3 mt-6">
-          {[
-            { label: 'Open Bugs', val: project.stats?.open_bugs || 0, c: 'text-red-600', bg: 'bg-red-50' },
-            { label: 'In Progress', val: project.stats?.in_progress_bugs || 0, c: 'text-amber-600', bg: 'bg-amber-50' },
-            { label: 'Done', val: project.stats?.done_bugs || 0, c: 'text-emerald-600', bg: 'bg-emerald-50' },
-            { label: 'Total Tasks', val: project.taskStats?.total_tasks || 0, c: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: 'Members', val: members.length, c: 'text-brand-600', bg: 'bg-brand-50' },
-          ].map(s => (
-            <div key={s.label} className={`${s.bg} rounded-xl p-3 text-center border border-ink-100`}>
-              <p className={`text-2xl font-bold ${s.c}`}>{s.val}</p>
-              <p className="text-[11px] uppercase tracking-wide text-ink-500 mt-0.5 font-semibold">{s.label}</p>
-            </div>
-          ))}
-        </div>
+        <BugStatusChart bugs={bugs} />
       </div>
 
       {/* Tabs */}
