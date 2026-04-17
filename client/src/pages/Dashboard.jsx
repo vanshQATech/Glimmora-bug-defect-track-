@@ -223,8 +223,14 @@ export default function Dashboard() {
               <span className="text-white/60">.</span>
             </h1>
             <p className="text-white/80 mt-3 text-sm md:text-base max-w-xl">
-              You have <span className="font-bold text-white">{stats.myBugs}</span> open bugs and{' '}
-              <span className="font-bold text-white">{stats.myTasks}</span> tasks on your plate today.
+              {stats.myBugs > 0 || stats.myTasks > 0 ? (
+                <>You have <span className="font-bold text-white">{stats.myBugs}</span> open bugs and{' '}
+                <span className="font-bold text-white">{stats.myTasks}</span> tasks on your plate today.</>
+              ) : (
+                <>Your team is tracking <span className="font-bold text-white">{bugs.active || 0}</span> active bugs across{' '}
+                <span className="font-bold text-white">{stats.projects || 0}</span> project{stats.projects === 1 ? '' : 's'}
+                {bugs.critical > 0 && <> · <span className="font-bold text-white">{bugs.critical}</span> critical</>}.</>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
