@@ -1,5 +1,5 @@
 const express = require('express');
-const fs = require('fs');
+const path = require('path');
 const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../database');
@@ -166,7 +166,7 @@ router.get('/:id', authenticate, (req, res) => {
 
     if (!bug) return res.status(404).json({ error: 'Bug not found' });
 
-    const attachments = db.prepare('SELECT * FROM bug_attachments WHERE bug_id = ?').all(bug.id);
+    const attachments = db.prepare('SELECT id, bug_id, filename, original_name, mimetype, size, uploaded_at FROM bug_attachments WHERE bug_id = ?').all(bug.id);
     const comments = db.prepare(`
       SELECT c.*, u.first_name || ' ' || u.last_name as user_name
       FROM comments c JOIN users u ON c.user_id = u.id
@@ -207,11 +207,13 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(bugId, bugNumber, project_id, summary, description || '', steps_to_reproduce || '', expected_result || '', actual_result || '', url || '', req.user.id, assignee_id || null, priority || 'Medium', severity || 'Major');
 
-    // Save attachments
+    // Save attachments (bytes stored in DB so they survive deploys)
     if (req.files && req.files.length > 0) {
-      const stmt = db.prepare('INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size) VALUES (?, ?, ?, ?, ?, ?)');
+      const stmt = db.prepare('INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const file of req.files) {
-        stmt.run(uuidv4(), bugId, file.filename, file.originalname, file.mimetype, file.size);
+        const ext = path.extname(file.originalname);
+        const filename = `${uuidv4()}${ext}`;
+        stmt.run(uuidv4(), bugId, filename, file.originalname, file.mimetype, file.size, file.buffer);
       }
     }
 
@@ -289,11 +291,13 @@ router.post('/:id/attachments', authenticate, upload.array('attachments', 10), (
     const db = getDb();
     const attachments = [];
     if (req.files) {
-      const stmt = db.prepare('INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size) VALUES (?, ?, ?, ?, ?, ?)');
+      const stmt = db.prepare('INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const file of req.files) {
         const attId = uuidv4();
-        stmt.run(attId, req.params.id, file.filename, file.originalname, file.mimetype, file.size);
-        attachments.push({ id: attId, filename: file.filename, original_name: file.originalname });
+        const ext = path.extname(file.originalname);
+        const filename = `${uuidv4()}${ext}`;
+        stmt.run(attId, req.params.id, filename, file.originalname, file.mimetype, file.size, file.buffer);
+        attachments.push({ id: attId, filename, original_name: file.originalname });
       }
     }
     res.status(201).json(attachments);
@@ -403,12 +407,11 @@ router.get('/project/:projectId/import-template', authenticate, isProjectMember,
 router.post('/project/:projectId/import', authenticate, isProjectMember, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'File is required' });
 
-  const filePath = req.file.path;
   try {
     const db = getDb();
     const { projectId } = req.params;
 
-    const wb = XLSX.readFile(filePath, { cellDates: true });
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
     const sheetName = wb.SheetNames[0];
     if (!sheetName) return res.status(400).json({ error: 'No sheets found in file' });
     const ws = wb.Sheets[sheetName];
@@ -497,8 +500,6 @@ router.post('/project/:projectId/import', authenticate, isProjectMember, upload.
     res.json({ ...results, detected_headers: detectedHeaders, header_map: headerMap });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  } finally {
-    fs.unlink(filePath, () => {});
   }
 });
 

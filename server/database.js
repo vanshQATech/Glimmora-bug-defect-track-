@@ -357,6 +357,12 @@ async function initializeDatabase() {
   addCol('due_date', 'TEXT');
   addCol('qa_owner_id', 'TEXT');
 
+  // Store attachment bytes in the DB so they survive Render's ephemeral disk
+  const attachCols = db.prepare("PRAGMA table_info(bug_attachments)").all().map(c => c.name);
+  if (!attachCols.includes('data')) {
+    try { db.exec(`ALTER TABLE bug_attachments ADD COLUMN data BLOB`); } catch (e) { console.error('migration data BLOB', e.message); }
+  }
+
   // Seed default accounts
   const seedUser = ({ email, password, firstName, lastName, role }) => {
     const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
