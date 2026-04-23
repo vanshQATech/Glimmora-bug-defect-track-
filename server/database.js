@@ -464,6 +464,14 @@ async function initializeDatabase() {
   // Deactivate the old default admin if it exists
   db.prepare("UPDATE users SET is_active = 0 WHERE email = 'admin@bugtrack.com'").run();
 
+  // Seed Glimmora Team project with scenarios & test cases (idempotent).
+  try {
+    const { seedGlimmora } = require('./scripts/seed-glimmora');
+    seedGlimmora(db);
+  } catch (err) {
+    console.error('Glimmora seed failed:', err.message);
+  }
+
   // Force immediate initial snapshot so schema + seed data land in Postgres
   await flushSnapshotNow();
 

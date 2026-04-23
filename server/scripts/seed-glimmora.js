@@ -797,10 +797,7 @@ function buildDescription(scenario) {
   return `${scenario.description}\n\nHigh-level scenarios:\n${bullets}`;
 }
 
-async function main() {
-  await initializeDatabase();
-  const db = getDb();
-
+function seedGlimmora(db, { log = console.log } = {}) {
   const owner = db.prepare('SELECT id, email FROM users WHERE email = ?').get(OWNER_EMAIL);
   if (!owner) {
     throw new Error(
@@ -816,12 +813,12 @@ async function main() {
       'INSERT INTO projects (id, name, description, created_by) VALUES (?, ?, ?, ?)',
     ).run(projectId, PROJECT_NAME, PROJECT_DESCRIPTION, owner.id);
     project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
-    console.log(`Created project "${PROJECT_NAME}" (${project.id})`);
+    log(`Created project "${PROJECT_NAME}" (${project.id})`);
   } else {
     db.prepare(
       "UPDATE projects SET description = ?, updated_at = datetime('now') WHERE id = ?",
     ).run(PROJECT_DESCRIPTION, project.id);
-    console.log(`Using existing project "${PROJECT_NAME}" (${project.id})`);
+    log(`Using existing project "${PROJECT_NAME}" (${project.id})`);
   }
 
   const ensureMember = userId => {
@@ -929,16 +926,26 @@ async function main() {
     }
   }
 
-  console.log(`\nScenarios: ${scenariosCreated} created, ${scenariosUpdated} updated`);
-  console.log(`Test cases: ${casesCreated} created, ${casesUpdated} updated`);
-  console.log('\nDone. Open the Test Cases module → "Glimmora Team" to view.');
+  log(`Glimmora seed — scenarios: ${scenariosCreated} created, ${scenariosUpdated} updated; cases: ${casesCreated} created, ${casesUpdated} updated`);
 
+  return { scenariosCreated, scenariosUpdated, casesCreated, casesUpdated, projectId: project.id };
+}
+
+async function main() {
+  await initializeDatabase();
+  const db = getDb();
+  seedGlimmora(db);
+  console.log('\nDone. Open the Test Cases module → "Glimmora Team" to view.');
   // Give the snapshot timer a moment to flush to Postgres if DATABASE_URL is set.
   await new Promise(r => setTimeout(r, 4000));
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = { seedGlimmora };
+
+if (require.main === module) {
+  main().catch(err => {
+    console.error(err);
+    process.exit(1);
+  });
+}
