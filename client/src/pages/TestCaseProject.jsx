@@ -197,6 +197,19 @@ export default function TestCaseProject() {
     }
   };
 
+  const updateCaseStatus = async (c, newStatus) => {
+    if (!newStatus || newStatus === c.status) return;
+    const prev = cases;
+    setCases(list => list.map(x => (x.id === c.id ? { ...x, status: newStatus } : x)));
+    try {
+      await api.put(`/testcases/cases/${c.id}`, { status: newStatus });
+      fetchAll();
+    } catch (err) {
+      setCases(prev);
+      alert(err.response?.data?.error || 'Failed to update status');
+    }
+  };
+
   const executed = (stats.pass_count || 0) + (stats.fail_count || 0) + (stats.blocked_count || 0);
   const passPct = executed ? Math.round(((stats.pass_count || 0) / executed) * 100) : 0;
   const progressPct = stats.total_cases ? Math.round((executed / stats.total_cases) * 100) : 0;
@@ -443,10 +456,20 @@ export default function TestCaseProject() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`chip ${STATUS_CHIP[c.status] || STATUS_CHIP['Not Run']}`}>
+                        <label className={`chip relative cursor-pointer ${STATUS_CHIP[c.status] || STATUS_CHIP['Not Run']}`}>
                           <Icon className="w-3 h-3" />
                           {c.status}
-                        </span>
+                          <select
+                            value={c.status}
+                            onChange={e => updateCaseStatus(c, e.target.value)}
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            aria-label={`Change status for TC-${c.tc_number}`}
+                          >
+                            {TC_STATUSES.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </label>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`chip ${PRIORITY_CHIP[c.priority] || ''}`}>{c.priority}</span>
