@@ -1,7 +1,9 @@
 const express = require('express');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../database');
 const { authenticate, isProjectMember } = require('../middleware/auth');
+const upload = require('../middleware/upload');
 const { sendNotificationEmail } = require('../utils/mailer');
 
 const router = express.Router();
@@ -28,9 +30,43 @@ function notifyUser(db, userId, type, title, message, entityType, entityId) {
   }
 }
 
+function saveAttachments(db, files, testCaseId, executionId, userId) {
+  if (!files || files.length === 0) return [];
+  const stmt = db.prepare(`
+    INSERT INTO test_case_attachments
+    (id, test_case_id, execution_id, filename, original_name, mimetype, size, data, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const saved = [];
+  for (const file of files) {
+    const id = uuidv4();
+    const ext = path.extname(file.originalname);
+    const filename = `${uuidv4()}${ext}`;
+    stmt.run(id, testCaseId, executionId || null, filename, file.originalname, file.mimetype, file.size, file.buffer, userId);
+    saved.push({ id, filename, original_name: file.originalname, mimetype: file.mimetype, size: file.size, buffer: file.buffer });
+  }
+  return saved;
+}
+
+// ---------- Attachment serving ----------
+
+router.get('/attachments/:filename', authenticate, (req, res) => {
+  try {
+    const row = getDb().prepare(
+      'SELECT mimetype, original_name, data FROM test_case_attachments WHERE filename = ?'
+    ).get(req.params.filename);
+    if (!row || !row.data) return res.status(404).json({ error: 'File not found' });
+    const buf = Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data);
+    res.setHeader('Content-Type', row.mimetype || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${row.original_name || req.params.filename}"`);
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------- Scenarios ----------
 
-// List scenarios for a project (with aggregate case stats)
 router.get('/scenarios/project/:projectId', authenticate, isProjectMember, (req, res) => {
   try {
     const db = getDb();
@@ -53,7 +89,6 @@ router.get('/scenarios/project/:projectId', authenticate, isProjectMember, (req,
   }
 });
 
-// Get one scenario
 router.get('/scenarios/:id', authenticate, (req, res) => {
   try {
     const db = getDb();
@@ -72,19 +107,16 @@ router.get('/scenarios/:id', authenticate, (req, res) => {
   }
 });
 
-// Create scenario
 router.post('/scenarios', authenticate, (req, res) => {
   try {
     const { project_id, name, description } = req.body;
     if (!project_id || !name) return res.status(400).json({ error: 'Project and name are required' });
-
     const db = getDb();
     const id = uuidv4();
     db.prepare(`
       INSERT INTO test_scenarios (id, project_id, name, description, created_by)
       VALUES (?, ?, ?, ?, ?)
     `).run(id, project_id, name, description || '', req.user.id);
-
     const scenario = db.prepare('SELECT * FROM test_scenarios WHERE id = ?').get(id);
     res.status(201).json(scenario);
   } catch (err) {
@@ -92,14 +124,12 @@ router.post('/scenarios', authenticate, (req, res) => {
   }
 });
 
-// Update scenario
 router.put('/scenarios/:id', authenticate, (req, res) => {
   try {
     const { name, description } = req.body;
     const db = getDb();
     const existing = db.prepare('SELECT * FROM test_scenarios WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Scenario not found' });
-
     db.prepare(`
       UPDATE test_scenarios
       SET name = COALESCE(?, name),
@@ -107,7 +137,6 @@ router.put('/scenarios/:id', authenticate, (req, res) => {
           updated_at = datetime('now')
       WHERE id = ?
     `).run(name ?? null, description ?? null, req.params.id);
-
     const scenario = db.prepare('SELECT * FROM test_scenarios WHERE id = ?').get(req.params.id);
     res.json(scenario);
   } catch (err) {
@@ -115,13 +144,13 @@ router.put('/scenarios/:id', authenticate, (req, res) => {
   }
 });
 
-// Delete scenario (cascade: cases + executions)
 router.delete('/scenarios/:id', authenticate, (req, res) => {
   try {
     const db = getDb();
     const caseIds = db.prepare('SELECT id FROM test_cases WHERE scenario_id = ?').all(req.params.id).map(c => c.id);
     for (const cid of caseIds) {
       db.prepare('DELETE FROM test_executions WHERE test_case_id = ?').run(cid);
+      db.prepare('DELETE FROM test_case_attachments WHERE test_case_id = ?').run(cid);
     }
     db.prepare('DELETE FROM test_cases WHERE scenario_id = ?').run(req.params.id);
     db.prepare('DELETE FROM test_scenarios WHERE id = ?').run(req.params.id);
@@ -133,17 +162,17 @@ router.delete('/scenarios/:id', authenticate, (req, res) => {
 
 // ---------- Test Cases ----------
 
-// List all cases for a project (with optional filters)
 router.get('/cases/project/:projectId', authenticate, isProjectMember, (req, res) => {
   try {
     const db = getDb();
-    const { status, priority, severity, scenario_id, assignee_id, search } = req.query;
+    const { status, priority, severity, case_type, scenario_id, assignee_id, search } = req.query;
     let query = `
       SELECT c.*,
         s.name as scenario_name,
         a.first_name || ' ' || a.last_name as assignee_name,
         cu.first_name || ' ' || cu.last_name as created_by_name,
-        b.bug_number as linked_bug_number, b.summary as linked_bug_summary
+        b.bug_number as linked_bug_number, b.summary as linked_bug_summary,
+        (SELECT COUNT(*) FROM test_case_attachments WHERE test_case_id = c.id AND execution_id IS NULL) as attachment_count
       FROM test_cases c
       LEFT JOIN test_scenarios s ON c.scenario_id = s.id
       LEFT JOIN users a ON c.assignee_id = a.id
@@ -155,6 +184,7 @@ router.get('/cases/project/:projectId', authenticate, isProjectMember, (req, res
     if (status) { query += ' AND c.status = ?'; params.push(status); }
     if (priority) { query += ' AND c.priority = ?'; params.push(priority); }
     if (severity) { query += ' AND c.severity = ?'; params.push(severity); }
+    if (case_type) { query += ' AND c.case_type = ?'; params.push(case_type); }
     if (scenario_id) { query += ' AND c.scenario_id = ?'; params.push(scenario_id); }
     if (assignee_id) { query += ' AND c.assignee_id = ?'; params.push(assignee_id); }
     if (search) {
@@ -169,7 +199,6 @@ router.get('/cases/project/:projectId', authenticate, isProjectMember, (req, res
   }
 });
 
-// List cases for a scenario
 router.get('/cases/scenario/:scenarioId', authenticate, (req, res) => {
   try {
     const db = getDb();
@@ -189,7 +218,6 @@ router.get('/cases/scenario/:scenarioId', authenticate, (req, res) => {
   }
 });
 
-// Get single test case with executions
 router.get('/cases/:id', authenticate, (req, res) => {
   try {
     const db = getDb();
@@ -220,18 +248,24 @@ router.get('/cases/:id', authenticate, (req, res) => {
       ORDER BY e.executed_at DESC
     `).all(tc.id);
 
-    res.json({ ...tc, executions });
+    const attachments = db.prepare(`
+      SELECT id, test_case_id, execution_id, filename, original_name, mimetype, size, uploaded_at
+      FROM test_case_attachments
+      WHERE test_case_id = ?
+      ORDER BY uploaded_at DESC
+    `).all(tc.id);
+
+    res.json({ ...tc, executions, attachments });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create test case
-router.post('/cases', authenticate, (req, res) => {
+router.post('/cases', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
     const {
       scenario_id, project_id, title, description, preconditions, steps,
-      expected_result, priority, severity, assignee_id,
+      expected_result, priority, severity, case_type, assignee_id,
     } = req.body;
 
     if (!scenario_id || !project_id || !title) {
@@ -246,14 +280,16 @@ router.post('/cases', authenticate, (req, res) => {
     db.prepare(`
       INSERT INTO test_cases (
         id, tc_number, scenario_id, project_id, title, description, preconditions, steps,
-        expected_result, priority, severity, assignee_id, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        expected_result, priority, severity, case_type, assignee_id, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, tcNumber, scenario_id, project_id, title,
       description || '', preconditions || '', steps || '',
       expected_result || '', priority || 'Medium', severity || 'Major',
-      assignee_id || null, req.user.id
+      case_type || 'Positive', assignee_id || null, req.user.id
     );
+
+    saveAttachments(db, req.files, id, null, req.user.id);
 
     if (assignee_id && assignee_id !== req.user.id) {
       notifyUser(db, assignee_id, 'testcase_assigned', 'Test Case Assigned',
@@ -267,7 +303,6 @@ router.post('/cases', authenticate, (req, res) => {
   }
 });
 
-// Update test case
 router.put('/cases/:id', authenticate, (req, res) => {
   try {
     const db = getDb();
@@ -276,8 +311,8 @@ router.put('/cases/:id', authenticate, (req, res) => {
 
     const updatable = [
       'title', 'description', 'preconditions', 'steps', 'expected_result',
-      'actual_result', 'status', 'priority', 'severity', 'assignee_id',
-      'scenario_id', 'linked_bug_id',
+      'actual_result', 'status', 'priority', 'severity', 'case_type',
+      'assignee_id', 'scenario_id', 'linked_bug_id',
     ];
     const sets = [];
     const vals = [];
@@ -307,12 +342,32 @@ router.put('/cases/:id', authenticate, (req, res) => {
   }
 });
 
-// Delete test case (cascade executions)
 router.delete('/cases/:id', authenticate, (req, res) => {
   try {
     const db = getDb();
     db.prepare('DELETE FROM test_executions WHERE test_case_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM test_case_attachments WHERE test_case_id = ?').run(req.params.id);
     db.prepare('DELETE FROM test_cases WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Upload attachments to an existing test case (not tied to an execution)
+router.post('/cases/:id/attachments', authenticate, upload.array('attachments', 10), (req, res) => {
+  try {
+    const db = getDb();
+    const saved = saveAttachments(db, req.files, req.params.id, null, req.user.id);
+    res.status(201).json(saved.map(a => ({ id: a.id, filename: a.filename, original_name: a.original_name, mimetype: a.mimetype, size: a.size })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/attachments/:attId', authenticate, (req, res) => {
+  try {
+    getDb().prepare('DELETE FROM test_case_attachments WHERE id = ?').run(req.params.attId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -321,10 +376,9 @@ router.delete('/cases/:id', authenticate, (req, res) => {
 
 // ---------- Execution ----------
 
-// Record execution (updates test case status too)
-router.post('/cases/:id/execute', authenticate, (req, res) => {
+router.post('/cases/:id/execute', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
-    const { status, actual_result, comments, linked_bug_id } = req.body;
+    const { status, actual_result, comments, linked_bug_id, auto_create_bug } = req.body;
     if (!status || !['Pass', 'Fail', 'Blocked'].includes(status)) {
       return res.status(400).json({ error: 'Valid status is required (Pass/Fail/Blocked)' });
     }
@@ -339,12 +393,71 @@ router.post('/cases/:id/execute', authenticate, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(execId, req.params.id, req.user.id, status, actual_result || '', comments || '', linked_bug_id || null);
 
-    const bugToLink = linked_bug_id || tc.linked_bug_id || null;
+    const savedAttachments = saveAttachments(db, req.files, req.params.id, execId, req.user.id);
+
+    let finalLinkedBugId = linked_bug_id || tc.linked_bug_id || null;
+
+    // Auto-create a bug on Fail if requested and none is linked yet
+    const shouldAutoCreate = String(auto_create_bug) === 'true' && status === 'Fail' && !finalLinkedBugId;
+    let createdBug = null;
+    if (shouldAutoCreate) {
+      const bugId = uuidv4();
+      const maxNum = db.prepare('SELECT COALESCE(MAX(bug_number), 0) as max_num FROM bugs WHERE project_id = ?').get(tc.project_id);
+      const bugNumber = (maxNum?.max_num || 0) + 1;
+
+      db.prepare(`
+        INSERT INTO bugs (
+          id, bug_number, project_id, summary, description, steps_to_reproduce,
+          expected_result, actual_result, reporter_id, assignee_id, priority, severity, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        bugId, bugNumber, tc.project_id,
+        `[TC-${tc.tc_number}] ${tc.title}`,
+        tc.description || '',
+        tc.steps || '',
+        tc.expected_result || '',
+        actual_result || tc.actual_result || '',
+        req.user.id,
+        tc.assignee_id || null,
+        tc.priority || 'Medium',
+        tc.severity || 'Major',
+        'Open'
+      );
+
+      // Copy execution attachments to bug_attachments so evidence is visible on the bug
+      if (savedAttachments.length > 0) {
+        const bstmt = db.prepare(`
+          INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size, data)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const a of savedAttachments) {
+          bstmt.run(uuidv4(), bugId, a.filename, a.original_name, a.mimetype, a.size, a.buffer);
+        }
+      }
+
+      try {
+        db.prepare(`
+          INSERT INTO audit_log (id, entity_type, entity_id, action, field_changed, old_value, new_value, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(uuidv4(), 'bug', bugId, 'created', null, null, `Auto-created from failed TC-${tc.tc_number}`, req.user.id);
+      } catch (e) { /* ignore */ }
+
+      if (tc.assignee_id && tc.assignee_id !== req.user.id) {
+        notifyUser(db, tc.assignee_id, 'bug_assigned', 'Bug Assigned',
+          `Bug "[TC-${tc.tc_number}] ${tc.title}" has been assigned to you`, 'bug', bugId);
+      }
+
+      // Update execution row to reference new bug
+      db.prepare('UPDATE test_executions SET linked_bug_id = ? WHERE id = ?').run(bugId, execId);
+      finalLinkedBugId = bugId;
+      createdBug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(bugId);
+    }
+
     db.prepare(`
       UPDATE test_cases
       SET status = ?, actual_result = ?, linked_bug_id = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(status, actual_result || '', bugToLink, req.params.id);
+    `).run(status, actual_result || '', finalLinkedBugId, req.params.id);
 
     const execution = db.prepare(`
       SELECT e.*, u.first_name || ' ' || u.last_name as executed_by_name
@@ -352,25 +465,22 @@ router.post('/cases/:id/execute', authenticate, (req, res) => {
       WHERE e.id = ?
     `).get(execId);
 
-    res.status(201).json(execution);
+    res.status(201).json({ execution, created_bug: createdBug, linked_bug_id: finalLinkedBugId });
   } catch (err) {
+    console.error('execute error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Link an existing bug to the test case
 router.post('/cases/:id/link-bug', authenticate, (req, res) => {
   try {
     const { bug_id } = req.body;
     if (!bug_id) return res.status(400).json({ error: 'bug_id is required' });
-
     const db = getDb();
     const bug = db.prepare('SELECT id FROM bugs WHERE id = ?').get(bug_id);
     if (!bug) return res.status(404).json({ error: 'Bug not found' });
-
     db.prepare(`UPDATE test_cases SET linked_bug_id = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(bug_id, req.params.id);
-
     const tc = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(req.params.id);
     res.json(tc);
   } catch (err) {
@@ -378,8 +488,7 @@ router.post('/cases/:id/link-bug', authenticate, (req, res) => {
   }
 });
 
-// Create a bug from a failed test case, and link it
-router.post('/cases/:id/create-bug', authenticate, (req, res) => {
+router.post('/cases/:id/create-bug', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
     const db = getDb();
     const tc = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(req.params.id);
@@ -413,6 +522,19 @@ router.post('/cases/:id/create-bug', authenticate, (req, res) => {
       'Open'
     );
 
+    // Attach any uploaded files to the bug
+    if (req.files && req.files.length > 0) {
+      const bstmt = db.prepare(`
+        INSERT INTO bug_attachments (id, bug_id, filename, original_name, mimetype, size, data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const f of req.files) {
+        const ext = path.extname(f.originalname);
+        const filename = `${uuidv4()}${ext}`;
+        bstmt.run(uuidv4(), bugId, filename, f.originalname, f.mimetype, f.size, f.buffer);
+      }
+    }
+
     db.prepare(`UPDATE test_cases SET linked_bug_id = ?, status = 'Fail', updated_at = datetime('now') WHERE id = ?`)
       .run(bugId, req.params.id);
 
@@ -428,7 +550,7 @@ router.post('/cases/:id/create-bug', authenticate, (req, res) => {
   }
 });
 
-// ---------- Stats / Reporting ----------
+// ---------- Stats ----------
 
 router.get('/stats/project/:projectId', authenticate, isProjectMember, (req, res) => {
   try {
@@ -439,7 +561,10 @@ router.get('/stats/project/:projectId', authenticate, isProjectMember, (req, res
         SUM(CASE WHEN status = 'Pass' THEN 1 ELSE 0 END) as pass_count,
         SUM(CASE WHEN status = 'Fail' THEN 1 ELSE 0 END) as fail_count,
         SUM(CASE WHEN status = 'Blocked' THEN 1 ELSE 0 END) as blocked_count,
-        SUM(CASE WHEN status = 'Not Run' THEN 1 ELSE 0 END) as notrun_count
+        SUM(CASE WHEN status = 'Not Run' THEN 1 ELSE 0 END) as notrun_count,
+        SUM(CASE WHEN case_type = 'Positive' THEN 1 ELSE 0 END) as positive_count,
+        SUM(CASE WHEN case_type = 'Negative' THEN 1 ELSE 0 END) as negative_count,
+        SUM(CASE WHEN case_type = 'Edge' THEN 1 ELSE 0 END) as edge_count
       FROM test_cases WHERE project_id = ?
     `).get(req.params.projectId);
 
@@ -452,13 +577,15 @@ router.get('/stats/project/:projectId', authenticate, isProjectMember, (req, res
       fail_count: stats?.fail_count || 0,
       blocked_count: stats?.blocked_count || 0,
       notrun_count: stats?.notrun_count || 0,
+      positive_count: stats?.positive_count || 0,
+      negative_count: stats?.negative_count || 0,
+      edge_count: stats?.edge_count || 0,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Per-project test-case list for dashboard stats (across all projects the user belongs to)
 router.get('/my/summary', authenticate, (req, res) => {
   try {
     const db = getDb();

@@ -9,10 +9,45 @@ export default function TestCases() {
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    api.get('/testcases/my/summary')
-      .then(r => setRows(r.data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      try {
+        // Try the optimized endpoint first
+        const r = await api.get('/testcases/my/summary');
+        if (!cancelled && Array.isArray(r.data) && r.data.length > 0) {
+          setRows(r.data);
+          return;
+        }
+        // Fallback: fetch projects directly (works even if backend is older or user has no test cases yet)
+        const p = await api.get('/projects');
+        if (cancelled) return;
+        const withStats = await Promise.all(
+          (p.data || []).map(async (proj) => {
+            try {
+              const s = await api.get(`/testcases/stats/project/${proj.id}`);
+              return { ...proj, ...s.data };
+            } catch {
+              return { ...proj, scenario_count: 0, total_cases: 0, pass_count: 0, fail_count: 0, blocked_count: 0, notrun_count: 0 };
+            }
+          })
+        );
+        if (!cancelled) setRows(withStats);
+      } catch (err) {
+        console.error(err);
+        // Last-resort fallback: just show projects with zero stats
+        try {
+          const p = await api.get('/projects');
+          if (!cancelled) {
+            setRows((p.data || []).map(proj => ({ ...proj, scenario_count: 0, total_cases: 0, pass_count: 0, fail_count: 0, blocked_count: 0, notrun_count: 0 })));
+          }
+        } catch {
+          if (!cancelled) setRows([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const filtered = rows.filter(r => r.name.toLowerCase().includes(query.toLowerCase()));

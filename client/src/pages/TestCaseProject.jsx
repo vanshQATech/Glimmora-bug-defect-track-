@@ -9,6 +9,13 @@ import {
 } from 'lucide-react';
 
 const TC_STATUSES = ['Not Run', 'Pass', 'Fail', 'Blocked'];
+const CASE_TYPES = ['Positive', 'Negative', 'Edge'];
+
+const CASE_TYPE_CHIP = {
+  'Positive': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Negative': 'bg-red-50 text-red-700 border-red-200',
+  'Edge':     'bg-purple-50 text-purple-700 border-purple-200',
+};
 
 const STATUS_CHIP = {
   'Pass':    'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -43,13 +50,14 @@ export default function TestCaseProject() {
   const [loading, setLoading] = useState(true);
 
   const [activeScenarioId, setActiveScenarioId] = useState(null); // null = All
-  const [filters, setFilters] = useState({ status: '', priority: '', search: '' });
+  const [filters, setFilters] = useState({ status: '', priority: '', case_type: '', search: '' });
 
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [editingScenario, setEditingScenario] = useState(null);
   const [scenarioForm, setScenarioForm] = useState({ name: '', description: '' });
 
   const [showCaseModal, setShowCaseModal] = useState(false);
+  const [caseFiles, setCaseFiles] = useState([]);
   const [caseForm, setCaseForm] = useState({
     scenario_id: '',
     title: '',
@@ -59,6 +67,7 @@ export default function TestCaseProject() {
     expected_result: '',
     priority: 'Medium',
     severity: 'Major',
+    case_type: 'Positive',
     assignee_id: '',
   });
 
@@ -89,6 +98,7 @@ export default function TestCaseProject() {
       if (activeScenarioId && c.scenario_id !== activeScenarioId) return false;
       if (filters.status && c.status !== filters.status) return false;
       if (filters.priority && c.priority !== filters.priority) return false;
+      if (filters.case_type && c.case_type !== filters.case_type) return false;
       if (filters.search) {
         const q = filters.search.toLowerCase();
         const hay = `${c.title} ${c.description || ''} TC-${c.tc_number}`.toLowerCase();
@@ -146,8 +156,10 @@ export default function TestCaseProject() {
       expected_result: '',
       priority: 'Medium',
       severity: 'Major',
+      case_type: 'Positive',
       assignee_id: '',
     });
+    setCaseFiles([]);
     setShowCaseModal(true);
   };
 
@@ -158,8 +170,17 @@ export default function TestCaseProject() {
       return;
     }
     try {
-      await api.post('/testcases/cases', { ...caseForm, project_id: projectId });
+      const fd = new FormData();
+      fd.append('project_id', projectId);
+      Object.entries(caseForm).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) fd.append(k, v);
+      });
+      caseFiles.forEach(f => fd.append('attachments', f));
+      await api.post('/testcases/cases', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       setShowCaseModal(false);
+      setCaseFiles([]);
       fetchAll();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to create test case');
@@ -349,9 +370,17 @@ export default function TestCaseProject() {
           <option value="">All priorities</option>
           {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        {(filters.search || filters.status || filters.priority) && (
+        <select
+          value={filters.case_type}
+          onChange={e => setFilters({ ...filters, case_type: e.target.value })}
+          className="input w-40"
+        >
+          <option value="">All types</option>
+          {CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {(filters.search || filters.status || filters.priority || filters.case_type) && (
           <button
-            onClick={() => setFilters({ status: '', priority: '', search: '' })}
+            onClick={() => setFilters({ status: '', priority: '', case_type: '', search: '' })}
             className="btn-ghost"
           >
             <X className="w-4 h-4" /> Clear
@@ -381,6 +410,7 @@ export default function TestCaseProject() {
                   <th className="px-4 py-3 font-semibold">ID</th>
                   <th className="px-4 py-3 font-semibold">Title</th>
                   <th className="px-4 py-3 font-semibold">Scenario</th>
+                  <th className="px-4 py-3 font-semibold">Type</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
                   <th className="px-4 py-3 font-semibold">Priority</th>
                   <th className="px-4 py-3 font-semibold">Assignee</th>
@@ -407,6 +437,11 @@ export default function TestCaseProject() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-ink-600">{c.scenario_name || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`chip ${CASE_TYPE_CHIP[c.case_type] || 'bg-ink-100 text-ink-600 border-ink-200'}`}>
+                          {c.case_type || 'Positive'}
+                        </span>
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`chip ${STATUS_CHIP[c.status] || STATUS_CHIP['Not Run']}`}>
                           <Icon className="w-3 h-3" />
@@ -577,7 +612,20 @@ export default function TestCaseProject() {
               />
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <label className="label">Case Type</label>
+                <select
+                  value={caseForm.case_type}
+                  onChange={e => setCaseForm({ ...caseForm, case_type: e.target.value })}
+                  className="input"
+                >
+                  {CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <p className="text-[10px] text-ink-500 mt-1">
+                  Positive = happy path · Negative = invalid input · Edge = boundary
+                </p>
+              </div>
               <div>
                 <label className="label">Priority</label>
                 <select
@@ -598,6 +646,22 @@ export default function TestCaseProject() {
                   {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="label">Attachments (screenshots, specs, etc.)</label>
+              <input
+                type="file"
+                multiple
+                onChange={e => setCaseFiles(Array.from(e.target.files || []))}
+                className="input"
+                accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+              />
+              {caseFiles.length > 0 && (
+                <p className="text-xs text-ink-500 mt-1">
+                  {caseFiles.length} file{caseFiles.length === 1 ? '' : 's'} ready to upload
+                </p>
+              )}
             </div>
 
             <div className="flex gap-3 justify-end pt-2">

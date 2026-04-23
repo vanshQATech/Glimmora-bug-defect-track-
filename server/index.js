@@ -19,7 +19,15 @@ app.get('/api/uploads/:filename', (req, res) => {
   try {
     const filename = req.params.filename;
     const db = getDb();
-    const row = db.prepare('SELECT mimetype, original_name, data FROM bug_attachments WHERE filename = ?').get(filename);
+
+    let row = db.prepare('SELECT mimetype, original_name, data FROM bug_attachments WHERE filename = ?').get(filename);
+    if (!row || !row.data) {
+      // Fallback: test case attachments share the same filename namespace
+      try {
+        row = db.prepare('SELECT mimetype, original_name, data FROM test_case_attachments WHERE filename = ?').get(filename);
+      } catch (_) { /* table may not exist on older snapshots */ }
+    }
+
     if (row && row.data) {
       const buf = Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data);
       res.setHeader('Content-Type', row.mimetype || 'application/octet-stream');

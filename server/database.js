@@ -366,6 +366,7 @@ async function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'Not Run',
       priority TEXT NOT NULL DEFAULT 'Medium',
       severity TEXT NOT NULL DEFAULT 'Major',
+      case_type TEXT DEFAULT 'Positive',
       assignee_id TEXT,
       linked_bug_id TEXT,
       created_by TEXT NOT NULL,
@@ -383,7 +384,27 @@ async function initializeDatabase() {
       linked_bug_id TEXT,
       executed_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS test_case_attachments (
+      id TEXT PRIMARY KEY,
+      test_case_id TEXT NOT NULL,
+      execution_id TEXT,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mimetype TEXT,
+      size INTEGER,
+      data BLOB,
+      uploaded_by TEXT NOT NULL,
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+
+  // Migration: add case_type if missing
+  const tcCols = db.prepare("PRAGMA table_info(test_cases)").all().map(c => c.name);
+  if (!tcCols.includes('case_type')) {
+    try { db.exec(`ALTER TABLE test_cases ADD COLUMN case_type TEXT DEFAULT 'Positive'`); }
+    catch (e) { console.error('migration case_type', e.message); }
+  }
 
   // Lightweight migrations for new bug fields
   const bugCols = db.prepare("PRAGMA table_info(bugs)").all().map(c => c.name);

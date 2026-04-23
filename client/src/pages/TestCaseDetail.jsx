@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api, { API_ORIGIN } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   ArrowLeft, ClipboardCheck, CheckCircle2, XCircle, MinusCircle, Clock,
-  Bug, Link2, PlayCircle, Save, X, History, Edit3, Trash2, User as UserIcon,
+  Bug, Link2, PlayCircle, Save, X, History, Edit3, Trash2,
+  Paperclip, Upload, FileText,
 } from 'lucide-react';
 
 const TC_STATUSES = ['Not Run', 'Pass', 'Fail', 'Blocked'];
+const CASE_TYPES = ['Positive', 'Negative', 'Edge'];
+
+const CASE_TYPE_CHIP = {
+  'Positive': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Negative': 'bg-red-50 text-red-700 border-red-200',
+  'Edge':     'bg-purple-50 text-purple-700 border-purple-200',
+};
+
+const attachmentUrl = (filename) => `${API_ORIGIN}/api/uploads/${filename}`;
 
 const STATUS_CHIP = {
   'Pass':    'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -40,11 +50,15 @@ export default function TestCaseDetail() {
     actual_result: '',
     comments: '',
     linked_bug_id: '',
+    auto_create_bug: true,
   });
+  const [execFiles, setExecFiles] = useState([]);
+  const [caseFiles, setCaseFiles] = useState([]);
+  const [uploadingCaseFiles, setUploadingCaseFiles] = useState(false);
 
   const [editForm, setEditForm] = useState({
     title: '', description: '', preconditions: '', steps: '', expected_result: '',
-    priority: 'Medium', severity: 'Major', assignee_id: '',
+    priority: 'Medium', severity: 'Major', case_type: 'Positive', assignee_id: '',
   });
 
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -55,7 +69,7 @@ export default function TestCaseDetail() {
     priority: 'High', severity: 'Major', assignee_id: '',
   });
 
-  const fetch = async () => {
+  const fetchCase = async () => {
     try {
       const r = await api.get(`/testcases/cases/${caseId}`);
       setTc(r.data);
@@ -67,6 +81,7 @@ export default function TestCaseDetail() {
         expected_result: r.data.expected_result || '',
         priority: r.data.priority || 'Medium',
         severity: r.data.severity || 'Major',
+        case_type: r.data.case_type || 'Positive',
         assignee_id: r.data.assignee_id || '',
       });
       setExec(e => ({ ...e, actual_result: r.data.actual_result || '' }));
@@ -85,7 +100,7 @@ export default function TestCaseDetail() {
     }
   };
 
-  useEffect(() => { fetch(); }, [caseId]);
+  useEffect(() => { fetchCase(); }, [caseId]);
 
   const saveCase = async () => {
     setSaving(true);
@@ -95,7 +110,7 @@ export default function TestCaseDetail() {
         assignee_id: editForm.assignee_id || null,
       });
       setEdit(false);
-      fetch();
+      fetchCase();
     } catch (err) {
       alert(err.response?.data?.error || 'Save failed');
     } finally {
@@ -117,12 +132,31 @@ export default function TestCaseDetail() {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post(`/testcases/cases/${caseId}/execute`, {
-        ...exec,
-        linked_bug_id: exec.linked_bug_id || null,
+      const fd = new FormData();
+      fd.append('status', exec.status);
+      fd.append('actual_result', exec.actual_result || '');
+      fd.append('comments', exec.comments || '');
+      if (exec.linked_bug_id) fd.append('linked_bug_id', exec.linked_bug_id);
+      // Only ask server to auto-create bug on Fail and when user did not manually pick an existing bug
+      if (exec.status === 'Fail' && exec.auto_create_bug && !exec.linked_bug_id) {
+        fd.append('auto_create_bug', 'true');
+      }
+      execFiles.forEach(f => fd.append('attachments', f));
+
+      const r = await api.post(`/testcases/cases/${caseId}/execute`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setExec({ status: 'Pass', actual_result: '', comments: '', linked_bug_id: '' });
-      fetch();
+
+      setExec({ status: 'Pass', actual_result: '', comments: '', linked_bug_id: '', auto_create_bug: true });
+      setExecFiles([]);
+      await fetchCase();
+
+      if (r.data.created_bug) {
+        const bugNum = r.data.created_bug.bug_number;
+        if (window.confirm(`Failure logged and bug #${bugNum} auto-created in this project. Open the bug now?`)) {
+          navigate(`/bugs/${r.data.created_bug.id}`);
+        }
+      }
     } catch (err) {
       alert(err.response?.data?.error || 'Execution failed');
     } finally {
@@ -130,11 +164,40 @@ export default function TestCaseDetail() {
     }
   };
 
+  const uploadCaseFiles = async (e) => {
+    e.preventDefault();
+    if (caseFiles.length === 0) return;
+    setUploadingCaseFiles(true);
+    try {
+      const fd = new FormData();
+      caseFiles.forEach(f => fd.append('attachments', f));
+      await api.post(`/testcases/cases/${caseId}/attachments`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setCaseFiles([]);
+      fetchCase();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Upload failed');
+    } finally {
+      setUploadingCaseFiles(false);
+    }
+  };
+
+  const deleteAttachment = async (attId) => {
+    if (!window.confirm('Remove this attachment?')) return;
+    try {
+      await api.delete(`/testcases/attachments/${attId}`);
+      fetchCase();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Delete failed');
+    }
+  };
+
   const linkExistingBug = async (bugId) => {
     try {
       await api.post(`/testcases/cases/${caseId}/link-bug`, { bug_id: bugId });
       setShowLinkModal(false);
-      fetch();
+      fetchCase();
     } catch (err) {
       alert(err.response?.data?.error || 'Link failed');
     }
@@ -143,7 +206,7 @@ export default function TestCaseDetail() {
   const unlinkBug = async () => {
     try {
       await api.put(`/testcases/cases/${caseId}`, { linked_bug_id: '' });
-      fetch();
+      fetchCase();
     } catch (err) {
       alert(err.response?.data?.error || 'Unlink failed');
     }
@@ -171,7 +234,7 @@ export default function TestCaseDetail() {
         assignee_id: bugForm.assignee_id || null,
       });
       setShowCreateBugModal(false);
-      fetch();
+      fetchCase();
       // Optional: navigate to bug
       if (window.confirm('Bug created. Open it now?')) {
         navigate(`/bugs/${r.data.id}`);
@@ -206,6 +269,7 @@ export default function TestCaseDetail() {
                   <Icon className="w-3 h-3" />
                   {tc.status}
                 </span>
+                <span className={`chip ${CASE_TYPE_CHIP[tc.case_type] || 'bg-ink-100 text-ink-600 border-ink-200'}`}>{tc.case_type || 'Positive'}</span>
                 <span className="chip bg-ink-100 text-ink-700 border-ink-200">{tc.priority}</span>
                 <span className="chip bg-ink-100 text-ink-700 border-ink-200">{tc.severity}</span>
               </div>
@@ -279,7 +343,20 @@ export default function TestCaseDetail() {
             />
 
             {edit && (
-              <div className="grid md:grid-cols-3 gap-4 pt-4 border-t border-ink-100">
+              <div className="grid md:grid-cols-2 gap-4 pt-4 border-t border-ink-100">
+                <div>
+                  <label className="label">Case Type</label>
+                  <select value={editForm.case_type} onChange={e => setEditForm({ ...editForm, case_type: e.target.value })} className="input">
+                    {CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Assignee</label>
+                  <select value={editForm.assignee_id} onChange={e => setEditForm({ ...editForm, assignee_id: e.target.value })} className="input">
+                    <option value="">Unassigned</option>
+                    {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label className="label">Priority</label>
                   <select value={editForm.priority} onChange={e => setEditForm({ ...editForm, priority: e.target.value })} className="input">
@@ -292,15 +369,43 @@ export default function TestCaseDetail() {
                     {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="label">Assignee</label>
-                  <select value={editForm.assignee_id} onChange={e => setEditForm({ ...editForm, assignee_id: e.target.value })} className="input">
-                    <option value="">Unassigned</option>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
-                  </select>
-                </div>
               </div>
             )}
+          </div>
+
+          {/* Attachments on the test case */}
+          <div className="card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Paperclip className="w-4 h-4 text-brand-600" />
+                <h2 className="section-title">Attachments</h2>
+                <span className="text-xs text-ink-500">
+                  {(tc.attachments || []).filter(a => !a.execution_id).length}
+                </span>
+              </div>
+            </div>
+            <AttachmentGallery
+              attachments={(tc.attachments || []).filter(a => !a.execution_id)}
+              onDelete={deleteAttachment}
+              emptyText="No files attached to this test case. Add screenshots, specs, or reference docs."
+            />
+            <form onSubmit={uploadCaseFiles} className="mt-4 flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+              <input
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+                onChange={e => setCaseFiles(Array.from(e.target.files || []))}
+                className="input flex-1"
+              />
+              <button
+                type="submit"
+                disabled={caseFiles.length === 0 || uploadingCaseFiles}
+                className="btn-primary whitespace-nowrap"
+              >
+                <Upload className="w-4 h-4" />
+                {uploadingCaseFiles ? 'Uploading…' : `Upload${caseFiles.length ? ` (${caseFiles.length})` : ''}`}
+              </button>
+            </form>
           </div>
 
           {/* Execution form */}
@@ -349,40 +454,81 @@ export default function TestCaseDetail() {
               </div>
 
               <div>
-                <label className="label">Comments / Evidence</label>
+                <label className="label">Comments</label>
                 <textarea
                   rows={2}
                   value={exec.comments}
                   onChange={e => setExec({ ...exec, comments: e.target.value })}
                   className="input"
-                  placeholder="Notes, screenshots links, environment details"
+                  placeholder="Environment details, notes, console output…"
                 />
               </div>
 
-              {exec.status === 'Fail' && (
-                <div>
-                  <label className="label">Link an existing bug (optional)</label>
-                  <select
-                    value={exec.linked_bug_id}
-                    onChange={e => setExec({ ...exec, linked_bug_id: e.target.value })}
-                    className="input"
-                  >
-                    <option value="">— None —</option>
-                    {projectBugs.map(b => (
-                      <option key={b.id} value={b.id}>
-                        #{b.bug_number} · {b.summary}
-                      </option>
-                    ))}
-                  </select>
+              <div>
+                <label className="label flex items-center gap-2">
+                  <Paperclip className="w-3 h-3" /> Evidence (screenshots, logs)
+                </label>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+                  onChange={e => setExecFiles(Array.from(e.target.files || []))}
+                  className="input"
+                />
+                {execFiles.length > 0 && (
                   <p className="text-xs text-ink-500 mt-1">
-                    Or use “Create Bug from Failure” in the right panel to raise a new bug.
+                    {execFiles.length} file{execFiles.length === 1 ? '' : 's'} attached to this execution
                   </p>
+                )}
+              </div>
+
+              {exec.status === 'Fail' && (
+                <div className="rounded-lg bg-red-50/60 border border-red-100 p-3 space-y-3">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exec.auto_create_bug}
+                      onChange={e => setExec({ ...exec, auto_create_bug: e.target.checked })}
+                      disabled={!!exec.linked_bug_id}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-red-800 flex items-center gap-1.5">
+                        <Bug className="w-3.5 h-3.5" /> Auto-create bug in this project
+                      </div>
+                      <p className="text-xs text-red-700/80 mt-0.5">
+                        A bug will be opened in <span className="font-semibold">{tc.project_name}</span> pre-filled
+                        from this test case, and any attachments above will be copied as evidence.
+                      </p>
+                    </div>
+                  </label>
+
+                  <div>
+                    <label className="label text-red-900">…or link an existing bug</label>
+                    <select
+                      value={exec.linked_bug_id}
+                      onChange={e => setExec({ ...exec, linked_bug_id: e.target.value })}
+                      className="input"
+                    >
+                      <option value="">— None —</option>
+                      {projectBugs.map(b => (
+                        <option key={b.id} value={b.id}>
+                          #{b.bug_number} · {b.summary}
+                        </option>
+                      ))}
+                    </select>
+                    {exec.linked_bug_id && (
+                      <p className="text-[11px] text-red-700 mt-1">
+                        Auto-create is disabled because you linked an existing bug.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
               <div className="flex justify-end">
                 <button type="submit" disabled={saving} className="btn-primary">
-                  <PlayCircle className="w-4 h-4" /> Record Execution
+                  <PlayCircle className="w-4 h-4" /> {saving ? 'Recording…' : 'Record Execution'}
                 </button>
               </div>
             </form>
@@ -401,6 +547,7 @@ export default function TestCaseDetail() {
               <ul className="space-y-3">
                 {tc.executions.map(ex => {
                   const EI = STATUS_ICON[ex.status] || Clock;
+                  const evidence = (tc.attachments || []).filter(a => a.execution_id === ex.id);
                   return (
                     <li key={ex.id} className="border border-ink-100 rounded-lg p-3">
                       <div className="flex items-center justify-between gap-2 mb-1">
@@ -421,6 +568,12 @@ export default function TestCaseDetail() {
                       )}
                       {ex.comments && (
                         <p className="text-sm text-ink-600 mt-1 italic">{ex.comments}</p>
+                      )}
+                      {evidence.length > 0 && (
+                        <div className="mt-2">
+                          <div className="text-[10px] uppercase tracking-wide text-ink-500 font-semibold mb-1.5">Evidence</div>
+                          <AttachmentGallery attachments={evidence} onDelete={deleteAttachment} compact />
+                        </div>
                       )}
                     </li>
                   );
@@ -464,6 +617,7 @@ export default function TestCaseDetail() {
 
           {/* Meta */}
           <div className="card p-5 space-y-3 text-sm">
+            <MetaRow label="Case Type" value={tc.case_type || 'Positive'} />
             <MetaRow label="Priority" value={tc.priority} />
             <MetaRow label="Severity" value={tc.severity} />
             <MetaRow label="Scenario" value={tc.scenario_name} />
@@ -609,6 +763,44 @@ function MetaRow({ label, value }) {
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs text-ink-500 font-medium">{label}</span>
       <span className="text-sm text-ink-800 font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+function AttachmentGallery({ attachments, onDelete, compact, emptyText }) {
+  if (!attachments || attachments.length === 0) {
+    return emptyText ? <p className="text-sm text-ink-400 italic">{emptyText}</p> : null;
+  }
+  const sizeClass = compact ? 'h-20' : 'h-32';
+  return (
+    <div className={`grid ${compact ? 'grid-cols-3 md:grid-cols-4 gap-2' : 'grid-cols-2 md:grid-cols-3 gap-3'}`}>
+      {attachments.map(a => {
+        const isImage = a.mimetype?.startsWith('image/');
+        const url = attachmentUrl(a.filename);
+        return (
+          <div key={a.id} className="group relative rounded-xl overflow-hidden border border-ink-100 hover:shadow-pop transition">
+            <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+              {isImage ? (
+                <img src={url} alt={a.original_name} className={`w-full ${sizeClass} object-cover`} />
+              ) : (
+                <div className={`w-full ${sizeClass} bg-brand-50 flex items-center justify-center`}>
+                  <FileText className="w-8 h-8 text-brand-400" />
+                </div>
+              )}
+              <p className="text-[11px] text-ink-600 truncate p-1.5 border-t border-ink-100">{a.original_name}</p>
+            </a>
+            {onDelete && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(a.id); }}
+                className="absolute top-1 right-1 p-1 rounded-md bg-white/90 text-ink-500 hover:text-red-600 opacity-0 group-hover:opacity-100 transition"
+                title="Remove"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
