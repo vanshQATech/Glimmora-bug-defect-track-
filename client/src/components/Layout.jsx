@@ -6,7 +6,8 @@ import Brand from './Brand';
 import AIChat from './AIChat';
 import {
   LayoutDashboard, FolderKanban, CheckSquare, Users, Bell, LogOut,
-  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight, Activity, Database
+  Menu, X, Briefcase, Search, Sparkles, ChevronsLeft, ChevronsRight, Activity, Database,
+  ClipboardCheck
 } from 'lucide-react';
 
 export default function Layout() {
@@ -59,6 +60,7 @@ export default function Layout() {
   const nav = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
     { to: '/projects', label: 'Projects', icon: FolderKanban },
+    { to: '/test-cases', label: 'Test Cases', icon: ClipboardCheck },
     { to: '/my-work', label: 'My Work', icon: CheckSquare },
     { to: '/workspace', label: 'Work Tracker', icon: Briefcase },
     { to: '/activity', label: 'Daily Log', icon: Activity },

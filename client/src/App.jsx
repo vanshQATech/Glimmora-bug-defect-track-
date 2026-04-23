@@ -15,6 +15,9 @@ import Workspace from './pages/Workspace';
 import Activity from './pages/Activity';
 import Profile from './pages/Profile';
 import DatabasePage from './pages/Database';
+import TestCases from './pages/TestCases';
+import TestCaseProject from './pages/TestCaseProject';
+import TestCaseDetail from './pages/TestCaseDetail';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -36,6 +39,9 @@ export default function App() {
         <Route path="projects/:projectId" element={<ProjectDetail />} />
         <Route path="bugs/:bugId" element={<BugDetail />} />
         <Route path="tasks/:taskId" element={<TaskDetail />} />
+        <Route path="test-cases" element={<TestCases />} />
+        <Route path="test-cases/case/:caseId" element={<TestCaseDetail />} />
+        <Route path="test-cases/:projectId" element={<TestCaseProject />} />
         <Route path="my-work" element={<MyWork />} />
         <Route path="workspace" element={<Workspace />} />
         <Route path="activity" element={<Activity />} />

@@ -341,6 +341,48 @@ async function initializeDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS test_scenarios (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS test_cases (
+      id TEXT PRIMARY KEY,
+      tc_number INTEGER,
+      scenario_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      preconditions TEXT,
+      steps TEXT,
+      expected_result TEXT,
+      actual_result TEXT,
+      status TEXT NOT NULL DEFAULT 'Not Run',
+      priority TEXT NOT NULL DEFAULT 'Medium',
+      severity TEXT NOT NULL DEFAULT 'Major',
+      assignee_id TEXT,
+      linked_bug_id TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS test_executions (
+      id TEXT PRIMARY KEY,
+      test_case_id TEXT NOT NULL,
+      executed_by TEXT NOT NULL,
+      status TEXT NOT NULL,
+      actual_result TEXT,
+      comments TEXT,
+      linked_bug_id TEXT,
+      executed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Lightweight migrations for new bug fields
