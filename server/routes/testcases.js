@@ -8,6 +8,63 @@ const { sendNotificationEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
+// Membership guards for test case / scenario / attachment routes.
+// They look up the entity, resolve its project_id, and verify the caller is
+// an Admin or a member of that project.
+function memberCheck(db, user, projectId) {
+  if (user.role === 'Admin') return true;
+  const m = db.prepare(
+    'SELECT id FROM project_members WHERE project_id = ? AND user_id = ?'
+  ).get(projectId, user.id);
+  return !!m;
+}
+
+function isCaseMember(req, res, next) {
+  const db = getDb();
+  const tc = db.prepare('SELECT project_id FROM test_cases WHERE id = ?').get(req.params.id);
+  if (!tc) return res.status(404).json({ error: 'Test case not found' });
+  if (!memberCheck(db, req.user, tc.project_id)) {
+    return res.status(403).json({ error: 'Not a member of this project' });
+  }
+  req.testCaseProjectId = tc.project_id;
+  next();
+}
+
+function isScenarioMember(req, res, next) {
+  const db = getDb();
+  const id = req.params.id || req.params.scenarioId;
+  const s = db.prepare('SELECT project_id FROM test_scenarios WHERE id = ?').get(id);
+  if (!s) return res.status(404).json({ error: 'Scenario not found' });
+  if (!memberCheck(db, req.user, s.project_id)) {
+    return res.status(403).json({ error: 'Not a member of this project' });
+  }
+  req.scenarioProjectId = s.project_id;
+  next();
+}
+
+function isAttachmentMember(req, res, next) {
+  const db = getDb();
+  let row;
+  if (req.params.filename) {
+    row = db.prepare(
+      `SELECT a.id, c.project_id FROM test_case_attachments a
+       LEFT JOIN test_cases c ON a.test_case_id = c.id
+       WHERE a.filename = ?`
+    ).get(req.params.filename);
+  } else if (req.params.attId) {
+    row = db.prepare(
+      `SELECT a.id, c.project_id FROM test_case_attachments a
+       LEFT JOIN test_cases c ON a.test_case_id = c.id
+       WHERE a.id = ?`
+    ).get(req.params.attId);
+  }
+  if (!row) return res.status(404).json({ error: 'Attachment not found' });
+  if (row.project_id && !memberCheck(db, req.user, row.project_id)) {
+    return res.status(403).json({ error: 'Not a member of this project' });
+  }
+  next();
+}
+
 function notifyUser(db, userId, type, title, message, entityType, entityId) {
   if (!userId) return;
   try {
@@ -50,7 +107,7 @@ function saveAttachments(db, files, testCaseId, executionId, userId) {
 
 // ---------- Attachment serving ----------
 
-router.get('/attachments/:filename', authenticate, (req, res) => {
+router.get('/attachments/:filename', authenticate, isAttachmentMember, (req, res) => {
   try {
     const row = getDb().prepare(
       'SELECT mimetype, original_name, data FROM test_case_attachments WHERE filename = ?'
@@ -89,7 +146,7 @@ router.get('/scenarios/project/:projectId', authenticate, isProjectMember, (req,
   }
 });
 
-router.get('/scenarios/:id', authenticate, (req, res) => {
+router.get('/scenarios/:id', authenticate, isScenarioMember, (req, res) => {
   try {
     const db = getDb();
     const scenario = db.prepare(`
@@ -107,7 +164,7 @@ router.get('/scenarios/:id', authenticate, (req, res) => {
   }
 });
 
-router.post('/scenarios', authenticate, (req, res) => {
+router.post('/scenarios', authenticate, isProjectMember, (req, res) => {
   try {
     const { project_id, name, description } = req.body;
     if (!project_id || !name) return res.status(400).json({ error: 'Project and name are required' });
@@ -124,7 +181,7 @@ router.post('/scenarios', authenticate, (req, res) => {
   }
 });
 
-router.put('/scenarios/:id', authenticate, (req, res) => {
+router.put('/scenarios/:id', authenticate, isScenarioMember, (req, res) => {
   try {
     const { name, description } = req.body;
     const db = getDb();
@@ -144,7 +201,7 @@ router.put('/scenarios/:id', authenticate, (req, res) => {
   }
 });
 
-router.delete('/scenarios/:id', authenticate, (req, res) => {
+router.delete('/scenarios/:id', authenticate, isScenarioMember, (req, res) => {
   try {
     const db = getDb();
     const caseIds = db.prepare('SELECT id FROM test_cases WHERE scenario_id = ?').all(req.params.id).map(c => c.id);
@@ -199,7 +256,7 @@ router.get('/cases/project/:projectId', authenticate, isProjectMember, (req, res
   }
 });
 
-router.get('/cases/scenario/:scenarioId', authenticate, (req, res) => {
+router.get('/cases/scenario/:scenarioId', authenticate, isScenarioMember, (req, res) => {
   try {
     const db = getDb();
     const cases = db.prepare(`
@@ -218,7 +275,7 @@ router.get('/cases/scenario/:scenarioId', authenticate, (req, res) => {
   }
 });
 
-router.get('/cases/:id', authenticate, (req, res) => {
+router.get('/cases/:id', authenticate, isCaseMember, (req, res) => {
   try {
     const db = getDb();
     const tc = db.prepare(`
@@ -261,7 +318,7 @@ router.get('/cases/:id', authenticate, (req, res) => {
   }
 });
 
-router.post('/cases', authenticate, upload.array('attachments', 10), (req, res) => {
+router.post('/cases', authenticate, upload.array('attachments', 10), isProjectMember, (req, res) => {
   try {
     const {
       scenario_id, project_id, title, description, preconditions, steps,
@@ -303,7 +360,7 @@ router.post('/cases', authenticate, upload.array('attachments', 10), (req, res) 
   }
 });
 
-router.put('/cases/:id', authenticate, (req, res) => {
+router.put('/cases/:id', authenticate, isCaseMember, (req, res) => {
   try {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(req.params.id);
@@ -342,7 +399,7 @@ router.put('/cases/:id', authenticate, (req, res) => {
   }
 });
 
-router.delete('/cases/:id', authenticate, (req, res) => {
+router.delete('/cases/:id', authenticate, isCaseMember, (req, res) => {
   try {
     const db = getDb();
     db.prepare('DELETE FROM test_executions WHERE test_case_id = ?').run(req.params.id);
@@ -355,7 +412,7 @@ router.delete('/cases/:id', authenticate, (req, res) => {
 });
 
 // Upload attachments to an existing test case (not tied to an execution)
-router.post('/cases/:id/attachments', authenticate, upload.array('attachments', 10), (req, res) => {
+router.post('/cases/:id/attachments', authenticate, upload.array('attachments', 10), isCaseMember, (req, res) => {
   try {
     const db = getDb();
     const saved = saveAttachments(db, req.files, req.params.id, null, req.user.id);
@@ -365,7 +422,7 @@ router.post('/cases/:id/attachments', authenticate, upload.array('attachments', 
   }
 });
 
-router.delete('/attachments/:attId', authenticate, (req, res) => {
+router.delete('/attachments/:attId', authenticate, isAttachmentMember, (req, res) => {
   try {
     getDb().prepare('DELETE FROM test_case_attachments WHERE id = ?').run(req.params.attId);
     res.json({ success: true });
@@ -376,7 +433,7 @@ router.delete('/attachments/:attId', authenticate, (req, res) => {
 
 // ---------- Execution ----------
 
-router.post('/cases/:id/execute', authenticate, upload.array('attachments', 10), (req, res) => {
+router.post('/cases/:id/execute', authenticate, upload.array('attachments', 10), isCaseMember, (req, res) => {
   try {
     const { status, actual_result, comments, linked_bug_id, auto_create_bug } = req.body;
     if (!status || !['Pass', 'Fail', 'Blocked'].includes(status)) {
@@ -472,7 +529,7 @@ router.post('/cases/:id/execute', authenticate, upload.array('attachments', 10),
   }
 });
 
-router.post('/cases/:id/link-bug', authenticate, (req, res) => {
+router.post('/cases/:id/link-bug', authenticate, isCaseMember, (req, res) => {
   try {
     const { bug_id } = req.body;
     if (!bug_id) return res.status(400).json({ error: 'bug_id is required' });
@@ -488,7 +545,7 @@ router.post('/cases/:id/link-bug', authenticate, (req, res) => {
   }
 });
 
-router.post('/cases/:id/create-bug', authenticate, upload.array('attachments', 10), (req, res) => {
+router.post('/cases/:id/create-bug', authenticate, upload.array('attachments', 10), isCaseMember, (req, res) => {
   try {
     const db = getDb();
     const tc = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(req.params.id);
