@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { Plus, FolderKanban, Bug, Users, X, Search, Trash2 } from 'lucide-react';
+import { Plus, FolderKanban, Bug, Users, X, Search, Trash2, Edit3 } from 'lucide-react';
 
 export default function Projects() {
   const { user } = useAuth();
@@ -11,6 +11,9 @@ export default function Projects() {
   const [form, setForm] = useState({ name: '', description: '' });
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [editingProject, setEditingProject] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', description: '', status: 'Active' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchProjects = () => {
     api.get('/projects').then(res => setProjects(res.data)).catch(console.error).finally(() => setLoading(false));
@@ -32,6 +35,40 @@ export default function Projects() {
 
   const canCreate = ['Admin', 'Project Manager'].includes(user?.role);
   const canDelete = user?.role === 'Admin';
+  const canEdit = ['Admin', 'Project Manager'].includes(user?.role);
+
+  const openEdit = (e, project) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingProject(project);
+    setEditForm({
+      name: project.name || '',
+      description: project.description || '',
+      status: project.status || 'Active',
+    });
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    if (!editForm.name.trim()) {
+      alert('Project name is required');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api.put(`/projects/${editingProject.id}`, {
+        name: editForm.name.trim(),
+        description: editForm.description,
+        status: editForm.status,
+      });
+      setEditingProject(null);
+      fetchProjects();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update project');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const handleDelete = async (e, project) => {
     e.preventDefault();
@@ -127,15 +164,26 @@ export default function Projects() {
           {filtered.map((p, i) => (
             <Link key={p.id} to={`/projects/${p.id}`} className="card card-hover p-5 group relative overflow-hidden">
               <div className={`absolute -right-10 -top-10 w-32 h-32 rounded-full bg-gradient-to-br ${gradients[i % gradients.length]} opacity-10 blur-2xl group-hover:opacity-20 transition-opacity`} />
-              {canDelete && (
-                <button
-                  onClick={(e) => handleDelete(e, p)}
-                  className="absolute top-3 right-3 z-10 p-1.5 rounded-lg text-ink-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition"
-                  title="Delete project"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
+              <div className="absolute top-3 right-3 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                {canEdit && (
+                  <button
+                    onClick={(e) => openEdit(e, p)}
+                    className="p-1.5 rounded-lg text-ink-400 hover:text-brand-600 hover:bg-brand-50 bg-white/80 backdrop-blur-sm"
+                    title="Edit project"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={(e) => handleDelete(e, p)}
+                    className="p-1.5 rounded-lg text-ink-400 hover:text-red-600 hover:bg-red-50 bg-white/80 backdrop-blur-sm"
+                    title="Delete project"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <div className="flex items-start justify-between mb-4">
                   <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${gradients[i % gradients.length]} flex items-center justify-center shadow-card`}>
@@ -155,6 +203,73 @@ export default function Projects() {
               </div>
             </Link>
           ))}
+        </div>
+      )}
+
+      {/* Edit Project Modal */}
+      {editingProject && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setEditingProject(null)}
+        >
+          <form
+            onClick={e => e.stopPropagation()}
+            onSubmit={saveEdit}
+            className="card p-6 w-full max-w-md space-y-5"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-ink-900">Edit Project</h2>
+                <p className="text-sm text-ink-500">Update the project name, description, or status</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingProject(null)}
+                className="text-ink-400 hover:text-ink-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div>
+              <label className="label">Project Name</label>
+              <input
+                type="text"
+                required
+                value={editForm.name}
+                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <textarea
+                rows={3}
+                value={editForm.description}
+                onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Status</label>
+              <select
+                value={editForm.status}
+                onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                className="input"
+              >
+                <option value="Active">Active</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Archived">Archived</option>
+              </select>
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <button type="button" onClick={() => setEditingProject(null)} className="btn-ghost">
+                Cancel
+              </button>
+              <button type="submit" disabled={savingEdit} className="btn-primary">
+                {savingEdit ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

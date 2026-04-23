@@ -8,7 +8,7 @@ import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, TASK_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   Plus, Bug, CheckSquare, Users, Search, Download, ArrowLeft, UserPlus, Mail,
-  X, Layers, List, Calendar, FolderKanban, Trash2, BarChart3
+  X, Layers, List, Calendar, FolderKanban, Trash2, BarChart3, Edit3, Save
 } from 'lucide-react';
 
 const KANBAN_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed'];
@@ -147,6 +147,9 @@ export default function ProjectDetail() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
   const importInputRef = useRef(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', description: '', status: 'Active' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchAll = () => {
     api.get(`/projects/${projectId}`).then(r => setProject(r.data)).catch(() => navigate('/projects'));
@@ -188,6 +191,39 @@ export default function ProjectDetail() {
   };
 
   const canManageProject = user?.role === 'Admin';
+  const canEditProject = ['Admin', 'Project Manager'].includes(user?.role);
+
+  const openEditProject = () => {
+    if (!project) return;
+    setEditForm({
+      name: project.name || '',
+      description: project.description || '',
+      status: project.status || 'Active',
+    });
+    setShowEditModal(true);
+  };
+
+  const saveEditProject = async (e) => {
+    e.preventDefault();
+    if (!editForm.name.trim()) {
+      alert('Project name is required');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api.put(`/projects/${projectId}`, {
+        name: editForm.name.trim(),
+        description: editForm.description,
+        status: editForm.status,
+      });
+      setShowEditModal(false);
+      fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update project');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const deleteProject = async () => {
     if (!project) return;
@@ -361,18 +397,34 @@ export default function ProjectDetail() {
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
           <div className="flex-1">
-            <h1 className="text-2xl font-bold text-ink-900 tracking-tight">{project.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-ink-900 tracking-tight">{project.name}</h1>
+              <span className={`chip ${project.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-ink-100 text-ink-600 border-ink-200'}`}>
+                {project.status}
+              </span>
+            </div>
             {project.description && <p className="text-ink-500 mt-1">{project.description}</p>}
           </div>
-          {canManageProject && (
-            <button
-              onClick={deleteProject}
-              className="btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
-              title="Delete project"
-            >
-              <Trash2 className="w-4 h-4" /> Delete
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {canEditProject && (
+              <button
+                onClick={openEditProject}
+                className="btn-secondary"
+                title="Edit project"
+              >
+                <Edit3 className="w-4 h-4" /> Edit
+              </button>
+            )}
+            {canManageProject && (
+              <button
+                onClick={deleteProject}
+                className="btn-ghost text-red-600 hover:bg-red-50 hover:text-red-700"
+                title="Delete project"
+              >
+                <Trash2 className="w-4 h-4" /> Delete
+              </button>
+            )}
+          </div>
         </div>
 
         <BugStatusChart bugs={bugs} />
@@ -831,6 +883,73 @@ export default function ProjectDetail() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Edit Project Modal */}
+      {showEditModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setShowEditModal(false)}
+        >
+          <form
+            onClick={e => e.stopPropagation()}
+            onSubmit={saveEditProject}
+            className="card p-6 w-full max-w-md space-y-5"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-ink-900">Edit Project</h2>
+                <p className="text-sm text-ink-500">Rename the project or update its details</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="text-ink-400 hover:text-ink-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div>
+              <label className="label">Project Name</label>
+              <input
+                type="text"
+                required
+                value={editForm.name}
+                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <textarea
+                rows={3}
+                value={editForm.description}
+                onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Status</label>
+              <select
+                value={editForm.status}
+                onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                className="input"
+              >
+                <option value="Active">Active</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Archived">Archived</option>
+              </select>
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <button type="button" onClick={() => setShowEditModal(false)} className="btn-ghost">
+                Cancel
+              </button>
+              <button type="submit" disabled={savingEdit} className="btn-primary">
+                <Save className="w-4 h-4" /> {savingEdit ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
