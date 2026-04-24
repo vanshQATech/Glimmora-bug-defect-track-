@@ -92,7 +92,15 @@ async function sendInviteEmail({ to, inviterName, projectName, token }) {
 async function sendNotificationEmail({ to, subject, message, entityType, entityId }) {
   const transport = getTransporter();
   if (!transport) {
-    console.log(`[Email skipped - SMTP not configured] Notification to ${to}`);
+    console.error(`[Mailer] SMTP not configured. Skipping notification to ${to}. Check SMTP_HOST, SMTP_USER, SMTP_PASS in .env`);
+    return false;
+  }
+
+  try {
+    await transport.verify();
+  } catch (err) {
+    console.error(`[Mailer] SMTP verify failed for notification to ${to}:`, err.message);
+    transporter = null;
     return false;
   }
 
@@ -101,29 +109,35 @@ async function sendNotificationEmail({ to, subject, message, entityType, entityI
     ? `${appUrl}/${entityType === 'project' ? 'projects' : entityType + 's'}/${entityId}`
     : appUrl;
 
-  await transport.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to,
-    subject: `[Glimmora DefectDesk] ${subject}`,
-    html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 40px 20px;">
-        <div style="text-align: center; margin-bottom: 32px;">
-          <h1 style="color: #4f46e5; font-size: 24px; margin: 0;">Glimmora DefectDesk</h1>
-        </div>
-        <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px;">
-          <h2 style="color: #111827; font-size: 18px; margin: 0 0 16px;">${subject}</h2>
-          <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">${message}</p>
-          <div style="text-align: center;">
-            <a href="${viewLink}" style="display: inline-block; background: #4f46e5; color: #ffffff; text-decoration: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;">
-              View in DefectDesk
-            </a>
+  try {
+    const info = await transport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject: `[Glimmora DefectDesk] ${subject}`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 32px;">
+            <h1 style="color: #4f46e5; font-size: 24px; margin: 0;">Glimmora DefectDesk</h1>
+          </div>
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px;">
+            <h2 style="color: #111827; font-size: 18px; margin: 0 0 16px;">${subject}</h2>
+            <p style="color: #374151; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">${message}</p>
+            <div style="text-align: center;">
+              <a href="${viewLink}" style="display: inline-block; background: #4f46e5; color: #ffffff; text-decoration: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;">
+                View in DefectDesk
+              </a>
+            </div>
           </div>
         </div>
-      </div>
-    `,
-  });
-
-  return true;
+      `,
+    });
+    console.log(`[Mailer] Notification sent to ${to} — ${info.messageId}`);
+    return true;
+  } catch (err) {
+    console.error(`[Mailer] Failed to send notification to ${to}:`, err.message);
+    transporter = null;
+    return false;
+  }
 }
 
 module.exports = { sendInviteEmail, sendNotificationEmail };

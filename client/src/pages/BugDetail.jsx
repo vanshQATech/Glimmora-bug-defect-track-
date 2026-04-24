@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api, { API_BASE } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +9,16 @@ import {
   Calendar, User, Bug as BugIcon, Activity, Clock, Plus
 } from 'lucide-react';
 
+const renderCommentWithMentions = (text) => {
+  if (!text) return null;
+  const parts = text.split(/(@[A-Za-z][A-Za-z0-9._'-]*(?:\s[A-Za-z][A-Za-z0-9._'-]*)?)/g);
+  return parts.map((part, i) =>
+    part.startsWith('@')
+      ? <span key={i} className="text-brand-700 bg-brand-50 px-1 rounded font-medium">{part}</span>
+      : <span key={i}>{part}</span>
+  );
+};
+
 export default function BugDetail() {
   const { bugId } = useParams();
   const navigate = useNavigate();
@@ -17,6 +27,10 @@ export default function BugDetail() {
   const [members, setMembers] = useState([]);
   const [comment, setComment] = useState('');
   const [editForm, setEditForm] = useState({});
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionedIds, setMentionedIds] = useState([]);
+  const commentInputRef = useRef(null);
 
   const fetchBug = () => {
     api.get(`/bugs/${bugId}`).then(res => {
@@ -42,8 +56,60 @@ export default function BugDetail() {
   const addComment = async (e) => {
     e.preventDefault();
     if (!comment.trim()) return;
-    try { await api.post(`/bugs/${bugId}/comments`, { content: comment }); setComment(''); fetchBug(); }
-    catch (err) { alert(err.response?.data?.error || 'Failed'); }
+    const ids = mentionedIds.filter(id => comment.includes(`@${members.find(m => m.id === id)?.first_name || ''}`));
+    try {
+      await api.post(`/bugs/${bugId}/comments`, { content: comment, mention_user_ids: ids });
+      setComment('');
+      setMentionedIds([]);
+      setMentionQuery(null);
+      fetchBug();
+    } catch (err) { alert(err.response?.data?.error || 'Failed'); }
+  };
+
+  const onCommentChange = (e) => {
+    const val = e.target.value;
+    setComment(val);
+    const caret = e.target.selectionStart ?? val.length;
+    const upToCaret = val.slice(0, caret);
+    const match = upToCaret.match(/@([A-Za-z][A-Za-z0-9._'-]*)$/);
+    if (match) {
+      setMentionQuery(match[1].toLowerCase());
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const filteredMembers = mentionQuery === null ? [] : members.filter(m => {
+    const full = `${m.first_name} ${m.last_name}`.toLowerCase();
+    return full.includes(mentionQuery) || m.email.toLowerCase().includes(mentionQuery);
+  }).slice(0, 6);
+
+  const insertMention = (member) => {
+    const input = commentInputRef.current;
+    const caret = input?.selectionStart ?? comment.length;
+    const before = comment.slice(0, caret).replace(/@[A-Za-z][A-Za-z0-9._'-]*$/, '');
+    const after = comment.slice(caret);
+    const token = `@${member.first_name} ${member.last_name} `;
+    const next = `${before}${token}${after}`;
+    setComment(next);
+    setMentionedIds(prev => prev.includes(member.id) ? prev : [...prev, member.id]);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      if (input) {
+        input.focus();
+        const pos = (before + token).length;
+        input.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const onCommentKeyDown = (e) => {
+    if (mentionQuery === null || filteredMembers.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % filteredMembers.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex(i => (i - 1 + filteredMembers.length) % filteredMembers.length); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(filteredMembers[mentionIndex]); }
+    else if (e.key === 'Escape') { setMentionQuery(null); }
   };
 
   const uploadAttachments = async (e) => {
@@ -223,15 +289,45 @@ export default function BugDetail() {
                         <span className="text-xs font-semibold text-ink-900">{c.user_name}</span>
                         <span className="text-[11px] text-ink-400">{new Date(c.created_at).toLocaleString()}</span>
                       </div>
-                      <p className="text-sm text-ink-700 whitespace-pre-wrap">{c.content}</p>
+                      <p className="text-sm text-ink-700 whitespace-pre-wrap">{renderCommentWithMentions(c.content)}</p>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-            <form onSubmit={addComment} className="flex gap-2 mt-4 pt-4 border-t border-ink-100">
-              <input type="text" value={comment} onChange={e => setComment(e.target.value)} placeholder="Add a comment…" className="input flex-1" />
-              <button type="submit" className="btn-primary px-3"><Send className="w-4 h-4" /></button>
+            <form onSubmit={addComment} className="mt-4 pt-4 border-t border-ink-100">
+              <div className="relative flex gap-2">
+                <input
+                  ref={commentInputRef}
+                  type="text"
+                  value={comment}
+                  onChange={onCommentChange}
+                  onKeyDown={onCommentKeyDown}
+                  placeholder="Add a comment… type @ to mention"
+                  className="input flex-1"
+                />
+                <button type="submit" className="btn-primary px-3"><Send className="w-4 h-4" /></button>
+                {mentionQuery !== null && filteredMembers.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 w-64 bg-white border border-ink-200 rounded-xl shadow-pop overflow-hidden z-20">
+                    {filteredMembers.map((m, i) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); insertMention(m); }}
+                        className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm hover:bg-brand-50 ${i === mentionIndex ? 'bg-brand-50' : ''}`}
+                      >
+                        <div className="w-6 h-6 rounded-full bg-brand-gradient text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                          {`${m.first_name[0] || ''}${m.last_name[0] || ''}`}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-ink-900 truncate">{m.first_name} {m.last_name}</div>
+                          <div className="text-[11px] text-ink-500 truncate">{m.email}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </form>
           </div>
 

@@ -309,7 +309,7 @@ router.post('/:id/attachments', authenticate, upload.array('attachments', 10), (
 // Add comment to bug
 router.post('/:id/comments', authenticate, (req, res) => {
   try {
-    const { content } = req.body;
+    const { content, mention_user_ids } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
 
     const db = getDb();
@@ -319,6 +319,28 @@ router.post('/:id/comments', authenticate, (req, res) => {
       .run(commentId, 'bug', req.params.id, req.user.id, content);
 
     addAuditLog(db, 'bug', req.params.id, 'comment_added', null, null, content, req.user.id);
+
+    const bug = db.prepare('SELECT summary, project_id FROM bugs WHERE id = ?').get(req.params.id);
+    const author = db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(req.user.id);
+    const authorName = author ? `${author.first_name} ${author.last_name}` : 'Someone';
+
+    const mentionIds = Array.isArray(mention_user_ids) ? [...new Set(mention_user_ids)] : [];
+    if (mentionIds.length > 0 && bug) {
+      const placeholders = mentionIds.map(() => '?').join(',');
+      const validMembers = db.prepare(
+        `SELECT user_id FROM project_members WHERE project_id = ? AND user_id IN (${placeholders})`
+      ).all(bug.project_id, ...mentionIds).map(r => r.user_id);
+
+      for (const userId of validMembers) {
+        if (userId === req.user.id) continue;
+        notifyUser(
+          db, userId, 'mention',
+          'You were mentioned in a comment',
+          `${authorName} mentioned you on bug "${bug.summary}": ${content}`,
+          'bug', req.params.id
+        );
+      }
+    }
 
     const comment = db.prepare(`
       SELECT c.*, u.first_name || ' ' || u.last_name as user_name
