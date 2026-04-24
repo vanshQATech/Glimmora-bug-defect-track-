@@ -89,7 +89,7 @@ async function sendInviteEmail({ to, inviterName, projectName, token }) {
   }
 }
 
-async function sendNotificationEmail({ to, subject, message, entityType, entityId }) {
+async function sendNotificationEmail({ to, subject, message, entityType, entityId, baseUrl }) {
   const transport = getTransporter();
   if (!transport) {
     console.error(`[Mailer] SMTP not configured. Skipping notification to ${to}. Check SMTP_HOST, SMTP_USER, SMTP_PASS in .env`);
@@ -104,7 +104,7 @@ async function sendNotificationEmail({ to, subject, message, entityType, entityI
     return false;
   }
 
-  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const appUrl = baseUrl || process.env.APP_URL || 'http://localhost:5173';
   const viewLink = entityType && entityId
     ? `${appUrl}/${entityType === 'project' ? 'projects' : entityType + 's'}/${entityId}`
     : appUrl;

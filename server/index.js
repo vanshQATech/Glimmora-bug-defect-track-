@@ -58,9 +58,21 @@ app.use('/api/activity', require('./routes/activity'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/testcases', require('./routes/testcases'));
 
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Glimmora Bug Tracker API is running' });
-});
+// Serve built React client (SPA) when available so email links like /bugs/:id resolve
+const clientDist = path.join(__dirname, '..', 'client', 'dist');
+const clientIndex = path.join(clientDist, 'index.html');
+if (fs.existsSync(clientIndex)) {
+  app.use(express.static(clientDist));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(clientIndex);
+  });
+} else {
+  app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'Glimmora Bug Tracker API is running' });
+  });
+}
 
 // Initialize database then start server
 async function start() {

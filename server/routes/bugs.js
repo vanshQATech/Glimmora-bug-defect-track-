@@ -73,7 +73,7 @@ function addAuditLog(db, entityType, entityId, action, field, oldVal, newVal, us
   `).run(uuidv4(), entityType, entityId, action, field, oldVal, newVal, userId);
 }
 
-function notifyUser(db, userId, type, title, message, entityType, entityId) {
+function notifyUser(db, userId, type, title, message, entityType, entityId, baseUrl) {
   if (!userId) return;
   try {
     db.prepare(`
@@ -88,13 +88,15 @@ function notifyUser(db, userId, type, title, message, entityType, entityId) {
     const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
     if (user) {
       Promise.resolve(
-        sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId })
+        sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId, baseUrl })
       ).catch(err => console.error('Notification email failed:', err.message));
     }
   } catch (err) {
     console.error('notifyUser email lookup failed:', err.message);
   }
 }
+
+const reqBaseUrl = (req) => req.headers.origin || `${req.protocol}://${req.get('host')}`;
 
 // List bugs for a project
 router.get('/project/:projectId', authenticate, isProjectMember, (req, res) => {
@@ -221,7 +223,7 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
 
     // Notify assignee
     if (assignee_id && assignee_id !== req.user.id) {
-      notifyUser(db, assignee_id, 'bug_assigned', 'Bug Assigned', `Bug "${summary}" has been assigned to you`, 'bug', bugId);
+      notifyUser(db, assignee_id, 'bug_assigned', 'Bug Assigned', `Bug "${summary}" has been assigned to you`, 'bug', bugId, reqBaseUrl(req));
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(bugId);
@@ -268,13 +270,13 @@ router.put('/:id', authenticate, (req, res) => {
     // Notify on assignment change
     const newAssignee = req.body.assignee_id;
     if (newAssignee && newAssignee !== existing.assignee_id && newAssignee !== req.user.id) {
-      notifyUser(db, newAssignee, 'bug_assigned', 'Bug Assigned', `Bug "${existing.summary}" has been assigned to you`, 'bug', req.params.id);
+      notifyUser(db, newAssignee, 'bug_assigned', 'Bug Assigned', `Bug "${existing.summary}" has been assigned to you`, 'bug', req.params.id, reqBaseUrl(req));
     }
 
     // Notify on status change
     const newStatus = req.body.status;
     if (newStatus && newStatus !== existing.status && existing.reporter_id !== req.user.id) {
-      notifyUser(db, existing.reporter_id, 'status_change', 'Bug Status Updated', `Bug "${existing.summary}" status changed to ${newStatus}`, 'bug', req.params.id);
+      notifyUser(db, existing.reporter_id, 'status_change', 'Bug Status Updated', `Bug "${existing.summary}" status changed to ${newStatus}`, 'bug', req.params.id, reqBaseUrl(req));
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
@@ -337,7 +339,7 @@ router.post('/:id/comments', authenticate, (req, res) => {
           db, userId, 'mention',
           'You were mentioned in a comment',
           `${authorName} mentioned you on bug "${bug.summary}": ${content}`,
-          'bug', req.params.id
+          'bug', req.params.id, reqBaseUrl(req)
         );
       }
     }
