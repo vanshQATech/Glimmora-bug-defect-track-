@@ -138,7 +138,7 @@ router.post('/invite', authenticate, authorize('Admin', 'Project Manager'), asyn
       }).catch(err => console.error('Email send failed:', err.message));
     }
 
-    const appUrl = process.env.APP_URL || req.headers.origin || 'http://localhost:5173';
+    const appUrl = req.headers.origin || process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
     const inviteLink = `${appUrl}/register?invitation=${token}`;
 
     // Try to send invite email (non-blocking — we still return success)
@@ -147,6 +147,7 @@ router.post('/invite', authenticate, authorize('Admin', 'Project Manager'), asyn
       inviterName,
       projectName,
       token,
+      baseUrl: appUrl,
     }).catch(err => ({ success: false, error: err.message }));
 
     res.status(201).json({

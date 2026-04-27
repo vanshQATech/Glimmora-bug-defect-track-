@@ -23,7 +23,7 @@ function getTransporter() {
   return transporter;
 }
 
-async function sendInviteEmail({ to, inviterName, projectName, token }) {
+async function sendInviteEmail({ to, inviterName, projectName, token, baseUrl }) {
   const transport = getTransporter();
   if (!transport) {
     console.error(`[Mailer] SMTP not configured. Check SMTP_HOST, SMTP_USER, SMTP_PASS in .env`);
@@ -41,7 +41,7 @@ async function sendInviteEmail({ to, inviterName, projectName, token }) {
     return { success: false, error: `SMTP connection failed: ${err.message}` };
   }
 
-  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const appUrl = baseUrl || process.env.APP_URL || 'http://localhost:5173';
   const registerLink = `${appUrl}/register?invitation=${token}`;
 
   try {

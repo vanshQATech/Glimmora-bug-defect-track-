@@ -227,7 +227,7 @@ router.post('/:projectId/invite', authenticate, authorize('Admin', 'Project Mana
       VALUES (?, ?, ?, ?, ?)
     `).run(uuidv4(), email.toLowerCase(), req.params.projectId, req.user.id, token);
 
-    const appUrl = process.env.APP_URL || req.headers.origin || 'http://localhost:5173';
+    const appUrl = req.headers.origin || process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
     const inviteLink = `${appUrl}/register?invitation=${token}`;
 
     // Try to send invite email (non-blocking — don't fail request if SMTP missing)
@@ -236,6 +236,7 @@ router.post('/:projectId/invite', authenticate, authorize('Admin', 'Project Mana
       inviterName,
       projectName: project.name,
       token,
+      baseUrl: appUrl,
     }).catch(err => ({ success: false, error: err.message }));
 
     const baseMessage = existingUser
