@@ -135,6 +135,7 @@ router.post('/invite', authenticate, authorize('Admin', 'Project Manager'), asyn
         message: notifMessage,
         entityType: 'project',
         entityId: project_id,
+        baseUrl: req.headers.origin || `${req.protocol}://${req.get('host')}`,
       }).catch(err => console.error('Email send failed:', err.message));
     }
 

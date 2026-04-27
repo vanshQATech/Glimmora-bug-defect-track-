@@ -2,6 +2,21 @@ const nodemailer = require('nodemailer');
 
 let transporter = null;
 
+function buildEntityLink(appUrl, entityType, entityId) {
+  if (!entityType) return appUrl;
+  // Workspace tasks have no detail page — link to the list.
+  if (entityType === 'work_task') return `${appUrl}/workspace`;
+  const detailPath = {
+    project: 'projects',
+    bug: 'bugs',
+    task: 'tasks',
+    testcase: 'test-cases/case',
+    test_case: 'test-cases/case',
+  }[entityType];
+  if (!detailPath) return appUrl;
+  return entityId ? `${appUrl}/${detailPath}/${entityId}` : `${appUrl}/${detailPath}`;
+}
+
 function getTransporter() {
   if (!transporter) {
     if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
@@ -105,9 +120,7 @@ async function sendNotificationEmail({ to, subject, message, entityType, entityI
   }
 
   const appUrl = baseUrl || process.env.APP_URL || 'http://localhost:5173';
-  const viewLink = entityType && entityId
-    ? `${appUrl}/${entityType === 'project' ? 'projects' : entityType + 's'}/${entityId}`
-    : appUrl;
+  const viewLink = buildEntityLink(appUrl, entityType, entityId);
 
   try {
     const info = await transport.sendMail({

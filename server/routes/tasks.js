@@ -106,7 +106,7 @@ router.post('/', authenticate, (req, res) => {
 
       const assignee = db.prepare('SELECT email FROM users WHERE id = ?').get(assignee_id);
       if (assignee) {
-        sendNotificationEmail({ to: assignee.email, subject: 'Task Assigned', message: notifMsg, entityType: 'task', entityId: taskId })
+        sendNotificationEmail({ to: assignee.email, subject: 'Task Assigned', message: notifMsg, entityType: 'task', entityId: taskId, baseUrl: req.headers.origin || `${req.protocol}://${req.get('host')}` })
           .catch(err => console.error('Notification email failed:', err.message));
       }
     }
@@ -157,7 +157,7 @@ router.put('/:id', authenticate, (req, res) => {
 
       const assignee = db.prepare('SELECT email FROM users WHERE id = ?').get(assignee_id);
       if (assignee) {
-        sendNotificationEmail({ to: assignee.email, subject: 'Task Assigned', message: notifMsg, entityType: 'task', entityId: req.params.id })
+        sendNotificationEmail({ to: assignee.email, subject: 'Task Assigned', message: notifMsg, entityType: 'task', entityId: req.params.id, baseUrl: req.headers.origin || `${req.protocol}://${req.get('host')}` })
           .catch(err => console.error('Notification email failed:', err.message));
       }
     }

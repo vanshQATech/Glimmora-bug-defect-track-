@@ -115,6 +115,7 @@ router.post('/tasks', authenticate, authorize('Admin', 'Project Manager'), (req,
         message: notifMsg,
         entityType: 'work_task',
         entityId: taskId,
+        baseUrl: req.headers.origin || `${req.protocol}://${req.get('host')}`,
       }).catch(err => console.error('Work task email failed:', err.message));
     }
 

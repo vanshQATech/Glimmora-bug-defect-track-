@@ -65,7 +65,9 @@ function isAttachmentMember(req, res, next) {
   next();
 }
 
-function notifyUser(db, userId, type, title, message, entityType, entityId) {
+const reqBaseUrl = (req) => req.headers.origin || `${req.protocol}://${req.get('host')}`;
+
+function notifyUser(db, userId, type, title, message, entityType, entityId, baseUrl) {
   if (!userId) return;
   try {
     db.prepare(`
@@ -79,7 +81,7 @@ function notifyUser(db, userId, type, title, message, entityType, entityId) {
     const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
     if (user) {
       Promise.resolve(
-        sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId })
+        sendNotificationEmail({ to: user.email, subject: title, message, entityType, entityId, baseUrl })
       ).catch(err => console.error('Notification email failed:', err.message));
     }
   } catch (err) {
@@ -350,7 +352,7 @@ router.post('/cases', authenticate, upload.array('attachments', 10), isProjectMe
 
     if (assignee_id && assignee_id !== req.user.id) {
       notifyUser(db, assignee_id, 'testcase_assigned', 'Test Case Assigned',
-        `Test case "${title}" has been assigned to you`, 'testcase', id);
+        `Test case "${title}" has been assigned to you`, 'testcase', id, reqBaseUrl(req));
     }
 
     const tc = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(id);
@@ -389,7 +391,7 @@ router.put('/cases/:id', authenticate, isCaseMember, (req, res) => {
     const newAssignee = req.body.assignee_id;
     if (newAssignee && newAssignee !== existing.assignee_id && newAssignee !== req.user.id) {
       notifyUser(db, newAssignee, 'testcase_assigned', 'Test Case Assigned',
-        `Test case "${existing.title}" has been assigned to you`, 'testcase', req.params.id);
+        `Test case "${existing.title}" has been assigned to you`, 'testcase', req.params.id, reqBaseUrl(req));
     }
 
     const tc = db.prepare('SELECT * FROM test_cases WHERE id = ?').get(req.params.id);
@@ -501,7 +503,7 @@ router.post('/cases/:id/execute', authenticate, upload.array('attachments', 10),
 
       if (tc.assignee_id && tc.assignee_id !== req.user.id) {
         notifyUser(db, tc.assignee_id, 'bug_assigned', 'Bug Assigned',
-          `Bug "[TC-${tc.tc_number}] ${tc.title}" has been assigned to you`, 'bug', bugId);
+          `Bug "[TC-${tc.tc_number}] ${tc.title}" has been assigned to you`, 'bug', bugId, reqBaseUrl(req));
       }
 
       // Update execution row to reference new bug
@@ -597,7 +599,7 @@ router.post('/cases/:id/create-bug', authenticate, upload.array('attachments', 1
 
     if (assignee_id && assignee_id !== req.user.id) {
       notifyUser(db, assignee_id, 'bug_assigned', 'Bug Assigned',
-        `Bug "${summary}" has been assigned to you`, 'bug', bugId);
+        `Bug "${summary}" has been assigned to you`, 'bug', bugId, reqBaseUrl(req));
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(bugId);
