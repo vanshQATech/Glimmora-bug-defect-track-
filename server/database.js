@@ -426,6 +426,19 @@ async function initializeDatabase() {
     try { db.exec(`ALTER TABLE bug_attachments ADD COLUMN data BLOB`); } catch (e) { console.error('migration data BLOB', e.message); }
   }
 
+  // Reporting fields on activity_updates: progress %, remarks, next action
+  const actCols = db.prepare("PRAGMA table_info(activity_updates)").all().map(c => c.name);
+  const addActCol = (name, type) => {
+    if (!actCols.includes(name)) {
+      try { db.exec(`ALTER TABLE activity_updates ADD COLUMN ${name} ${type}`); }
+      catch (e) { console.error('migration activity', name, e.message); }
+    }
+  };
+  addActCol('progress_percent', 'INTEGER DEFAULT 0');
+  addActCol('remarks', 'TEXT');
+  addActCol('next_action', 'TEXT');
+  addActCol('title', 'TEXT');
+
   // Seed default accounts
   const seedUser = ({ email, password, firstName, lastName, role }) => {
     const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(email);
