@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Loader2, Volume2, VolumeX } from 'lucide-react';
+import { Sparkles, X, Send, Loader2, Volume2, VolumeX, Maximize2, Minimize2 } from 'lucide-react';
 import api from '../utils/api';
 
 const VOICE_PREF_KEY = 'glimmora.aiVoiceEnabled';
@@ -63,6 +63,7 @@ export default function AIChat() {
     const stored = localStorage.getItem(VOICE_PREF_KEY);
     return stored === null ? true : stored === '1';
   });
+  const [maximized, setMaximized] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -147,7 +148,13 @@ export default function AIChat() {
 
       {/* Chat panel */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 w-[380px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-3rem)] bg-white rounded-2xl shadow-pop border border-ink-100 flex flex-col overflow-hidden animate-fade-in">
+        <div
+          className={`fixed z-50 bg-white rounded-2xl shadow-pop border border-ink-100 flex flex-col overflow-hidden animate-fade-in ${
+            maximized
+              ? 'inset-4 sm:inset-6 md:inset-10'
+              : 'bottom-6 right-6 w-[560px] max-w-[calc(100vw-2rem)] h-[720px] max-h-[calc(100vh-3rem)]'
+          }`}
+        >
           <div className="flex items-center justify-between px-4 py-3 bg-brand-gradient text-white">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
@@ -169,6 +176,13 @@ export default function AIChat() {
                   {voiceOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                 </button>
               )}
+              <button
+                onClick={() => setMaximized(m => !m)}
+                className="p-1.5 rounded hover:bg-white/10 text-white"
+                title={maximized ? 'Restore size' : 'Maximize'}
+              >
+                {maximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
               <button
                 onClick={reset}
                 className="text-[11px] text-white/80 hover:text-white px-2 py-1 rounded hover:bg-white/10"
