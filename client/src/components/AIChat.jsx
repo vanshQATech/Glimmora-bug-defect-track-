@@ -1,11 +1,43 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Loader2 } from 'lucide-react';
+import { Sparkles, X, Send, Loader2, Volume2, VolumeX } from 'lucide-react';
 import api from '../utils/api';
+
+const VOICE_PREF_KEY = 'glimmora.aiVoiceEnabled';
+const ttsAvailable = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+function plainText(markdown) {
+  return String(markdown || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^[-*]\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function speak(text) {
+  if (!ttsAvailable) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(plainText(text).slice(0, 1000));
+    utter.rate = 1;
+    utter.pitch = 1;
+    window.speechSynthesis.speak(utter);
+  } catch (_) { /* ignore */ }
+}
+
+function stopSpeaking() {
+  if (!ttsAvailable) return;
+  try { window.speechSynthesis.cancel(); } catch (_) { /* ignore */ }
+}
 
 const WELCOME = {
   role: 'assistant',
   content:
-    "Hi! I'm the **Glimmora DefectDesk Assistant**. Ask me anything about your bugs, tasks, projects, workspace, or how to use the platform.",
+    "Hi! I'm the **Glimmora DefectDesk Assistant**. Ask me about your projects, daily updates, bugs, tasks, or team progress — e.g. *\"give me update for employee Ravi\"* or *\"how many cases per project\"*.",
 };
 
 function renderMarkdown(text) {
@@ -26,6 +58,11 @@ export default function AIChat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [voiceOn, setVoiceOn] = useState(() => {
+    if (!ttsAvailable) return false;
+    const stored = localStorage.getItem(VOICE_PREF_KEY);
+    return stored === null ? true : stored === '1';
+  });
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -37,11 +74,15 @@ export default function AIChat() {
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
+    else stopSpeaking();
   }, [open]);
+
+  useEffect(() => () => stopSpeaking(), []);
 
   const send = async () => {
     const text = input.trim();
     if (!text || loading) return;
+    stopSpeaking();
     setError('');
     const nextHistory = [...messages, { role: 'user', content: text }];
     setMessages(nextHistory);
@@ -52,7 +93,9 @@ export default function AIChat() {
         message: text,
         history: nextHistory.filter(m => m !== WELCOME).slice(0, -1),
       });
-      setMessages(m => [...m, { role: 'assistant', content: res.data.reply }]);
+      const reply = res.data.reply;
+      setMessages(m => [...m, { role: 'assistant', content: reply }]);
+      if (voiceOn) speak(reply);
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to reach the AI assistant.';
       setError(msg);
@@ -70,8 +113,23 @@ export default function AIChat() {
   };
 
   const reset = () => {
+    stopSpeaking();
     setMessages([WELCOME]);
     setError('');
+  };
+
+  const toggleVoice = () => {
+    setVoiceOn(v => {
+      const next = !v;
+      localStorage.setItem(VOICE_PREF_KEY, next ? '1' : '0');
+      if (!next) stopSpeaking();
+      return next;
+    });
+  };
+
+  const replayLast = () => {
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+    if (lastAssistant) speak(lastAssistant.content);
   };
 
   return (
@@ -101,6 +159,16 @@ export default function AIChat() {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {ttsAvailable && (
+                <button
+                  onClick={toggleVoice}
+                  onDoubleClick={replayLast}
+                  className={`p-1.5 rounded hover:bg-white/10 ${voiceOn ? 'text-white' : 'text-white/50'}`}
+                  title={voiceOn ? 'Voice on (double-click to replay last reply)' : 'Voice off'}
+                >
+                  {voiceOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                </button>
+              )}
               <button
                 onClick={reset}
                 className="text-[11px] text-white/80 hover:text-white px-2 py-1 rounded hover:bg-white/10"
@@ -158,7 +226,7 @@ export default function AIChat() {
               </button>
             </div>
             <div className="text-[10px] text-ink-400 mt-1.5 text-center">
-              Scoped to Glimmora DefectDesk features only.
+              Scoped to Glimmora DefectDesk data. {ttsAvailable ? 'Toggle voice in the header.' : ''}
             </div>
           </div>
         </div>
