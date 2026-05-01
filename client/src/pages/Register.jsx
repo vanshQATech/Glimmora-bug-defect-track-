@@ -8,16 +8,33 @@ export default function Register() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
+  const { register, login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try { await register(form); navigate('/'); }
-    catch (err) { setError(err.response?.data?.error || 'Registration failed'); }
-    finally { setLoading(false); }
+    try {
+      await register(form);
+      navigate('/');
+    } catch (err) {
+      const message = err.response?.data?.error || '';
+      if (message === 'Email already registered') {
+        // Email exists — try logging in with the same credentials
+        try {
+          await login(form.email, form.password);
+          navigate('/');
+          return;
+        } catch {
+          setError('This email is already registered. Please sign in instead.');
+        }
+      } else {
+        setError(message || 'Registration failed');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
