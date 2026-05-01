@@ -115,18 +115,21 @@ router.post('/forgot-password', async (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(uuidv4(), user.id, token, expiresAt);
 
-    const appUrl = process.env.APP_URL;
-    if (!appUrl) {
-      console.error('[Auth] APP_URL is not set in environment variables. Password reset emails will have broken links.');
-    }
-    const resetLink = `${appUrl || 'http://localhost:5173'}/reset-password?token=${token}`;
+    const appUrl = process.env.APP_URL || 'http://localhost:5173';
+    const resetLink = `${appUrl}/reset-password?token=${token}`;
 
-    const emailResult = await sendPasswordResetEmail({ to: user.email, resetLink });
-    if (!emailResult.success) {
-      console.error(`[Auth] Failed to send password reset email to ${user.email}: ${emailResult.error}`);
-    }
-
+    // Respond immediately — send email in background so request never hangs
     res.json({ message: 'If that email exists, a reset link has been sent.' });
+
+    sendPasswordResetEmail({ to: user.email, resetLink })
+      .then(result => {
+        if (!result.success) {
+          console.error(`[Auth] Failed to send password reset email to ${user.email}: ${result.error}`);
+        } else {
+          console.log(`[Auth] Password reset email sent to ${user.email}`);
+        }
+      })
+      .catch(err => console.error(`[Auth] Unexpected error sending reset email:`, err.message));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
