@@ -160,21 +160,4 @@ router.post('/reset-password', (req, res) => {
   }
 });
 
-// Temporary admin password reset — remove after use
-router.post('/admin-force-reset', async (req, res) => {
-  try {
-    const { secret, email, newPassword } = req.body;
-    if (secret !== 'glimmora-temp-reset-2026') return res.status(403).json({ error: 'Forbidden' });
-    if (!email || !newPassword) return res.status(400).json({ error: 'email and newPassword required' });
-    const db = getDb();
-    const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const hashed = bcrypt.hashSync(newPassword, 10);
-    db.prepare("UPDATE users SET password = ?, updated_at = datetime('now') WHERE id = ?").run(hashed, user.id);
-    res.json({ message: `Password reset for ${email}` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
