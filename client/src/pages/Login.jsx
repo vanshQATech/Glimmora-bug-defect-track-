@@ -107,9 +107,6 @@ export default function Login() {
               Don't have an account? <Link to="/register" className="text-brand-700 font-semibold hover:underline">Create one</Link>
             </p>
 
-            <div className="text-center text-[11px] text-ink-400 pt-3 border-t border-ink-100">
-              Default admin: admin@bugtrack.com / admin123
-            </div>
           </form>
         </div>
       </div>
