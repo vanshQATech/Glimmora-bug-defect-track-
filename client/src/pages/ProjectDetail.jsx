@@ -22,6 +22,9 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  // Normalize options: accept either string[] or {value, label}[]
+  const normalized = options.map(o => typeof o === 'string' ? { value: o, label: o } : o);
+
   const toggle = (v) => {
     const next = new Set(selected);
     if (next.has(v)) next.delete(v); else next.add(v);
@@ -52,19 +55,19 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
               Clear all
             </button>
           )}
-          {options.map(opt => {
-            const checked = selected.has(opt);
+          {normalized.map(opt => {
+            const checked = selected.has(opt.value);
             return (
               <button
-                key={opt}
+                key={opt.value}
                 type="button"
-                onClick={() => toggle(opt)}
+                onClick={() => toggle(opt.value)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-ink-50 text-left"
               >
                 <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-brand-gradient border-transparent' : 'border-ink-300 bg-white'}`}>
                   {checked && <Check className="w-3 h-3 text-white" />}
                 </span>
-                <span className="text-ink-800">{opt}</span>
+                <span className="text-ink-800">{opt.label}</span>
               </button>
             );
           })}
@@ -73,6 +76,8 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
     </div>
   );
 }
+
+const UNASSIGNED_KEY = '__unassigned__';
 
 const KANBAN_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed'];
 
@@ -196,7 +201,7 @@ export default function ProjectDetail() {
   const [search, setSearch] = useState('');
   const [filterStatuses, setFilterStatuses] = useState(() => new Set());
   const [filterPriorities, setFilterPriorities] = useState(() => new Set());
-  const [filterAssignee, setFilterAssignee] = useState('');
+  const [filterAssignees, setFilterAssignees] = useState(() => new Set());
   const [showBugModal, setShowBugModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showMemberModal, setShowMemberModal] = useState(false);
@@ -216,28 +221,36 @@ export default function ProjectDetail() {
 
   const fetchAll = () => {
     api.get(`/projects/${projectId}`).then(r => setProject(r.data)).catch(() => navigate('/projects'));
-    // Status & priority are applied client-side (multi-select) — only pass server-side filters here
-    api.get(`/bugs/project/${projectId}`, { params: { search, assignee_id: filterAssignee } }).then(r => setBugs(r.data));
+    // Status, priority, and assignee are all applied client-side (multi-select)
+    api.get(`/bugs/project/${projectId}`, { params: { search } }).then(r => setBugs(r.data));
     api.get(`/tasks/project/${projectId}`, { params: { search } }).then(r => setTasks(r.data));
     api.get('/users').then(r => setAllUsers(r.data));
   };
 
-  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search, filterAssignee]);
+  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search]);
 
   // Apply multi-select filters client-side
   const filteredBugs = useMemo(() => bugs.filter(b => {
     if (filterStatuses.size && !filterStatuses.has(b.status)) return false;
     if (filterPriorities.size && !filterPriorities.has(b.priority)) return false;
+    if (filterAssignees.size) {
+      const key = b.assignee_id || UNASSIGNED_KEY;
+      if (!filterAssignees.has(key)) return false;
+    }
     return true;
-  }), [bugs, filterStatuses, filterPriorities]);
+  }), [bugs, filterStatuses, filterPriorities, filterAssignees]);
 
   const filteredTasks = useMemo(() => tasks.filter(t => {
     if (filterStatuses.size && !filterStatuses.has(t.status)) return false;
     if (filterPriorities.size && !filterPriorities.has(t.priority)) return false;
+    if (filterAssignees.size) {
+      const key = t.assignee_id || UNASSIGNED_KEY;
+      if (!filterAssignees.has(key)) return false;
+    }
     return true;
-  }), [tasks, filterStatuses, filterPriorities]);
+  }), [tasks, filterStatuses, filterPriorities, filterAssignees]);
 
-  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0;
+  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0 || filterAssignees.size > 0;
 
   const createBug = async (e) => {
     e.preventDefault();
@@ -518,7 +531,7 @@ export default function ProjectDetail() {
         ].map(t => {
           const Icon = t.icon;
           return (
-            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatuses(new Set()); setFilterPriorities(new Set()); setFilterAssignee(''); }}
+            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatuses(new Set()); setFilterPriorities(new Set()); setFilterAssignees(new Set()); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.id ? 'bg-brand-gradient text-white shadow-card' : 'text-ink-600 hover:bg-ink-50'}`}>
               <Icon className="w-4 h-4" /> {t.label}
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab === t.id ? 'bg-white/20' : 'bg-ink-100'}`}>{t.count}</span>
@@ -546,12 +559,15 @@ export default function ProjectDetail() {
             selected={filterPriorities}
             onChange={setFilterPriorities}
           />
-          {tab === 'bugs' && (
-            <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input w-auto">
-              <option value="">All Assignees</option>
-              {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
-            </select>
-          )}
+          <MultiSelectFilter
+            label="Assignees"
+            options={[
+              { value: UNASSIGNED_KEY, label: 'Unassigned' },
+              ...members.map(m => ({ value: m.id, label: `${m.first_name} ${m.last_name}` })),
+            ]}
+            selected={filterAssignees}
+            onChange={setFilterAssignees}
+          />
           {tab === 'tasks' && (
             <div className="flex items-center gap-1 p-0.5 bg-ink-100 rounded-lg ml-1">
               <button onClick={() => setTaskView('board')} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium ${taskView === 'board' ? 'bg-white text-ink-900 shadow-card' : 'text-ink-500'}`}><Layers className="w-3.5 h-3.5" /> Board</button>
@@ -591,7 +607,7 @@ export default function ProjectDetail() {
               </div>
               {filtersActive && (
                 <button
-                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); }}
+                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); setFilterAssignees(new Set()); }}
                   className="text-xs text-brand-700 hover:underline font-medium flex items-center gap-1"
                 >
                   <X className="w-3 h-3" /> Clear filters
@@ -682,7 +698,7 @@ export default function ProjectDetail() {
               </div>
               {filtersActive && (
                 <button
-                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); }}
+                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); setFilterAssignees(new Set()); }}
                   className="text-xs text-brand-700 hover:underline font-medium flex items-center gap-1"
                 >
                   <X className="w-3 h-3" /> Clear filters
