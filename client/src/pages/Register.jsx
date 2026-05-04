@@ -26,8 +26,15 @@ export default function Register() {
           await login(form.email, form.password);
           navigate('/');
           return;
-        } catch {
-          setError('This email is already registered. Please sign in instead.');
+        } catch (loginErr) {
+          const loginMsg = loginErr.response?.data?.error || '';
+          if (loginMsg === 'Invalid credentials') {
+            setError('This email is already registered, but the password is different. Use Forgot password to reset it.');
+          } else if (loginMsg === 'Account is deactivated') {
+            setError('This account exists but is deactivated. Please contact your admin.');
+          } else {
+            setError(loginMsg || 'This email is already registered. Please sign in instead.');
+          }
         }
       } else {
         setError(message || 'Registration failed');

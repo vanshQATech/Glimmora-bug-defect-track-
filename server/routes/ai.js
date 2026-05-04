@@ -568,4 +568,88 @@ router.post('/chat', authenticate, async (req, res) => {
   }
 });
 
+// ---------- generate test cases endpoint ----------
+const GENERATE_TC_SYSTEM = `You are a QA engineer assistant. Generate comprehensive test cases based on the user's description.
+
+Respond with ONLY valid JSON in this exact format, no other text:
+{
+  "test_cases": [
+    {
+      "title": "Descriptive test case title",
+      "description": "Brief description of what this test verifies",
+      "preconditions": "What must be true before running (empty string if none)",
+      "steps": "1. Step one\\n2. Step two\\n3. Step three",
+      "expected_result": "What should happen after the steps",
+      "priority": "Critical|High|Medium|Low",
+      "severity": "Critical|Major|Minor|Trivial",
+      "case_type": "Positive|Negative|Edge"
+    }
+  ]
+}
+
+Rules:
+- Generate 4-8 test cases covering positive, negative, and edge cases
+- Steps must be numbered and clear
+- Expected results must be specific and verifiable
+- Use Critical/High priority for core flows, Medium/Low for edge cases
+- Include at least one Positive, one Negative, and one Edge case
+- Keep titles concise (under 80 chars)`;
+
+router.post('/generate-test-cases', authenticate, async (req, res) => {
+  const anthropic = getClient();
+  if (!anthropic) {
+    return res.status(503).json({ error: 'AI assistant is not configured. Add ANTHROPIC_API_KEY to server .env.' });
+  }
+
+  const { prompt, scenario_name } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
+  if (prompt.length > 2000) return res.status(400).json({ error: 'prompt too long (max 2000 chars)' });
+
+  const userMsg = scenario_name
+    ? `Generate test cases for: ${prompt}\n\nScenario context: ${scenario_name}`
+    : `Generate test cases for: ${prompt}`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 3000,
+      system: GENERATE_TC_SYSTEM,
+      messages: [{ role: 'user', content: userMsg }],
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+
+    let testCases;
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+      testCases = parsed.test_cases || [];
+    } catch (_) {
+      return res.status(500).json({ error: 'AI returned unexpected format. Please try again.' });
+    }
+
+    const VALID_PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+    const VALID_SEVERITIES = ['Critical', 'Major', 'Minor', 'Trivial'];
+    const VALID_TYPES = ['Positive', 'Negative', 'Edge'];
+
+    const cleaned = testCases
+      .map(tc => ({
+        title: String(tc.title || '').trim().slice(0, 200),
+        description: String(tc.description || '').trim(),
+        preconditions: String(tc.preconditions || '').trim(),
+        steps: String(tc.steps || '').trim(),
+        expected_result: String(tc.expected_result || '').trim(),
+        priority: VALID_PRIORITIES.includes(tc.priority) ? tc.priority : 'Medium',
+        severity: VALID_SEVERITIES.includes(tc.severity) ? tc.severity : 'Major',
+        case_type: VALID_TYPES.includes(tc.case_type) ? tc.case_type : 'Positive',
+      }))
+      .filter(tc => tc.title);
+
+    res.json({ test_cases: cleaned });
+  } catch (err) {
+    console.error('[AI generate-test-cases] error:', err?.message || err);
+    res.status(err?.status || 500).json({ error: err?.message || 'AI request failed' });
+  }
+});
+
 module.exports = router;

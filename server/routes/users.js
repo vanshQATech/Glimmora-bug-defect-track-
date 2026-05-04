@@ -76,6 +76,44 @@ router.put('/:id/role', authenticate, authorize('Admin'), (req, res) => {
   }
 });
 
+// Reset another user's password (admin only). If no password is provided,
+// generate a strong random one and return it so the admin can share it.
+router.post('/:id/reset-password', authenticate, authorize('Admin'), (req, res) => {
+  try {
+    const db = getDb();
+    const target = db.prepare('SELECT id, email FROM users WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    let { password } = req.body || {};
+    if (password) {
+      if (typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+    } else {
+      const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+      const lower = 'abcdefghijkmnpqrstuvwxyz';
+      const digits = '23456789';
+      const symbols = '!@#$%';
+      const all = upper + lower + digits + symbols;
+      const pick = (s) => s[Math.floor(Math.random() * s.length)];
+      const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+      while (chars.length < 12) chars.push(pick(all));
+      password = chars.sort(() => Math.random() - 0.5).join('');
+    }
+
+    const hashed = bcrypt.hashSync(password, 10);
+    db.prepare("UPDATE users SET password = ?, updated_at = datetime('now') WHERE id = ?").run(hashed, target.id);
+
+    res.json({
+      message: 'Password reset successfully. Share this password with the user — it will not be shown again.',
+      email: target.email,
+      password,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Activate/deactivate user (admin only)
 router.put('/:id/status', authenticate, authorize('Admin'), (req, res) => {
   try {

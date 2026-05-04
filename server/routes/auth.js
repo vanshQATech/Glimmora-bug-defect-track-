@@ -16,9 +16,14 @@ router.post('/register', (req, res) => {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
+    const normalizedEmail = String(email).trim().toLowerCase();
+
     const db = getDb();
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const existing = db.prepare('SELECT id, is_active FROM users WHERE email = ?').get(normalizedEmail);
     if (existing) {
+      if (!existing.is_active) {
+        return res.status(403).json({ error: 'This account exists but is deactivated. Please contact your admin.' });
+      }
       return res.status(409).json({ error: 'Email already registered' });
     }
 
@@ -28,7 +33,7 @@ router.post('/register', (req, res) => {
     db.prepare(`
       INSERT INTO users (id, email, password, first_name, last_name)
       VALUES (?, ?, ?, ?, ?)
-    `).run(userId, email.toLowerCase(), hashedPassword, first_name, last_name);
+    `).run(userId, normalizedEmail, hashedPassword, first_name, last_name);
 
     // If registering via invitation, accept it and add to project
     if (invitation_token) {

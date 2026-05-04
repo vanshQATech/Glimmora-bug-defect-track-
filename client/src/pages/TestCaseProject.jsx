@@ -6,6 +6,7 @@ import { PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   ArrowLeft, Plus, ClipboardCheck, Layers, Search, X, Trash2, Edit3,
   CheckCircle2, XCircle, MinusCircle, Clock, FolderKanban, Filter,
+  Sparkles, Loader2,
 } from 'lucide-react';
 
 const TC_STATUSES = ['Not Run', 'Pass', 'Fail', 'Blocked'];
@@ -55,6 +56,62 @@ export default function TestCaseProject() {
   const [showScenarioModal, setShowScenarioModal] = useState(false);
   const [editingScenario, setEditingScenario] = useState(null);
   const [scenarioForm, setScenarioForm] = useState({ name: '', description: '' });
+
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiScenarioId, setAiScenarioId] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResults, setAiResults] = useState([]);
+  const [aiImporting, setAiImporting] = useState(false);
+  const [aiError, setAiError] = useState('');
+
+  const openAIModal = () => {
+    setAiPrompt('');
+    setAiScenarioId(activeScenarioId || (scenarios[0]?.id ? String(scenarios[0].id) : ''));
+    setAiResults([]);
+    setAiError('');
+    setShowAIModal(true);
+  };
+
+  const generateTestCases = async () => {
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const scenarioName = scenarios.find(s => String(s.id) === String(aiScenarioId))?.name || '';
+      const { data } = await api.post('/ai/generate-test-cases', { prompt: aiPrompt, scenario_name: scenarioName });
+      setAiResults((data.test_cases || []).map(tc => ({ ...tc, selected: true })));
+    } catch (err) {
+      setAiError(err.response?.data?.error || 'Failed to generate test cases. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const importSelected = async () => {
+    const toImport = aiResults.filter(x => x.selected);
+    if (toImport.length === 0) return;
+    setAiImporting(true);
+    setAiError('');
+    try {
+      for (const tc of toImport) {
+        const fd = new FormData();
+        fd.append('project_id', projectId);
+        fd.append('scenario_id', aiScenarioId);
+        Object.entries(tc).forEach(([k, v]) => {
+          if (k !== 'selected') fd.append(k, v ?? '');
+        });
+        await api.post('/testcases/cases', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
+      setShowAIModal(false);
+      setAiResults([]);
+      setAiPrompt('');
+      fetchAll();
+    } catch (err) {
+      setAiError(err.response?.data?.error || 'Failed to import some test cases.');
+    } finally {
+      setAiImporting(false);
+    }
+  };
 
   const [showCaseModal, setShowCaseModal] = useState(false);
   const [caseFiles, setCaseFiles] = useState([]);
@@ -239,6 +296,14 @@ export default function TestCaseProject() {
             </Link>
             <button onClick={openCreateScenario} className="btn-secondary">
               <Layers className="w-4 h-4" /> New Scenario
+            </button>
+            <button
+              onClick={openAIModal}
+              disabled={scenarios.length === 0}
+              className="btn-secondary"
+              title={scenarios.length === 0 ? 'Create a scenario first' : 'Generate test cases with AI'}
+            >
+              <Sparkles className="w-4 h-4 text-brand-600" /> AI Generate
             </button>
             <button
               onClick={openCreateCase}
@@ -501,6 +566,167 @@ export default function TestCaseProject() {
           </div>
         )}
       </div>
+
+      {/* AI Generate Modal */}
+      {showAIModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => !aiLoading && !aiImporting && setShowAIModal(false)}
+        >
+          <div className="card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-5" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-brand-gradient flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-ink-900">AI Test Case Generator</h2>
+                  <p className="text-xs text-ink-500">Describe what to test — AI will generate detailed test cases</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !aiLoading && !aiImporting && setShowAIModal(false)}
+                className="text-ink-400 hover:text-ink-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {aiResults.length === 0 ? (
+              /* —— Prompt form —— */
+              <>
+                <div>
+                  <label className="label">What do you want to test? *</label>
+                  <textarea
+                    rows={4}
+                    value={aiPrompt}
+                    onChange={e => setAiPrompt(e.target.value)}
+                    className="input"
+                    placeholder={`e.g. "User login with email and password — include valid credentials, wrong password, locked account, and empty fields"`}
+                    disabled={aiLoading}
+                  />
+                  <p className="text-[11px] text-ink-400 mt-1">Be specific — mention the feature, inputs, and edge cases you care about.</p>
+                </div>
+                <div>
+                  <label className="label">Target Scenario *</label>
+                  <select
+                    value={aiScenarioId}
+                    onChange={e => setAiScenarioId(e.target.value)}
+                    className="input"
+                    disabled={aiLoading}
+                  >
+                    <option value="">Select a scenario</option>
+                    {scenarios.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                {aiError && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{aiError}</div>
+                )}
+                <div className="flex justify-end gap-3 pt-1">
+                  <button type="button" onClick={() => setShowAIModal(false)} className="btn-ghost" disabled={aiLoading}>Cancel</button>
+                  <button
+                    type="button"
+                    onClick={generateTestCases}
+                    disabled={aiLoading || !aiPrompt.trim() || !aiScenarioId}
+                    className="btn-primary"
+                  >
+                    {aiLoading
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>
+                      : <><Sparkles className="w-4 h-4" /> Generate Test Cases</>}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* —— Results —— */
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-ink-700">
+                    {aiResults.length} test cases generated — select which to import:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setAiResults([]); setAiError(''); }}
+                    className="text-xs text-brand-700 hover:underline font-medium"
+                  >
+                    ← Edit prompt
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {aiResults.map((tc, i) => (
+                    <label
+                      key={i}
+                      className={`flex gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                        tc.selected
+                          ? 'border-brand-400 bg-brand-50/60 shadow-sm'
+                          : 'border-ink-200 bg-white hover:bg-ink-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tc.selected}
+                        onChange={() => setAiResults(prev => prev.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
+                        className="mt-0.5 accent-brand-600 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                          <span className="font-medium text-ink-900 text-sm">{tc.title}</span>
+                          <span className={`chip text-[10px] ${CASE_TYPE_CHIP[tc.case_type] || 'bg-ink-100 text-ink-600 border-ink-200'}`}>{tc.case_type}</span>
+                          <span className={`chip text-[10px] ${PRIORITY_CHIP[tc.priority] || ''}`}>{tc.priority}</span>
+                        </div>
+                        {tc.description && (
+                          <p className="text-xs text-ink-500 line-clamp-1">{tc.description}</p>
+                        )}
+                        {tc.steps && (
+                          <p className="text-[11px] text-ink-400 font-mono mt-1 line-clamp-2 whitespace-pre-line">{tc.steps}</p>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                {aiError && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{aiError}</div>
+                )}
+
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setAiResults(prev => prev.map(x => ({ ...x, selected: true })))}
+                      className="text-brand-700 hover:underline font-medium"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAiResults(prev => prev.map(x => ({ ...x, selected: false })))}
+                      className="text-ink-500 hover:underline"
+                    >
+                      Deselect all
+                    </button>
+                  </div>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setShowAIModal(false)} className="btn-ghost" disabled={aiImporting}>Cancel</button>
+                    <button
+                      type="button"
+                      onClick={importSelected}
+                      disabled={aiImporting || !aiResults.some(x => x.selected)}
+                      className="btn-primary"
+                    >
+                      {aiImporting
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
+                        : `Import ${aiResults.filter(x => x.selected).length} Selected`}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Scenario modal */}
       {showScenarioModal && (

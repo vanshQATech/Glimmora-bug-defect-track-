@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, Shield, Power } from 'lucide-react';
+import { UserPlus, Shield, Power, KeyRound, Copy, Check } from 'lucide-react';
 
 const ROLES = ['Admin', 'Project Manager', 'Developer', 'QA', 'Product Manager', 'Standard User'];
 
@@ -58,6 +58,55 @@ export default function UsersPage() {
       await api.put(`/users/${userId}/status`, { is_active: !currentActive });
       fetchUsers();
     } catch (err) { alert(err.response?.data?.error || 'Failed'); }
+  };
+
+  const [resetTarget, setResetTarget] = useState(null);
+  const [resetCustom, setResetCustom] = useState('');
+  const [resetMode, setResetMode] = useState('auto');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetResult, setResetResult] = useState(null);
+  const [resetCopied, setResetCopied] = useState(false);
+
+  const openResetPassword = (u) => {
+    setResetTarget(u);
+    setResetMode('auto');
+    setResetCustom('');
+    setResetResult(null);
+    setResetCopied(false);
+  };
+
+  const submitResetPassword = async () => {
+    if (!resetTarget) return;
+    if (resetMode === 'custom' && resetCustom.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const body = resetMode === 'custom' ? { password: resetCustom } : {};
+      const { data } = await api.post(`/users/${resetTarget.id}/reset-password`, body);
+      setResetResult(data);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reset password');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const copyPassword = () => {
+    if (!resetResult?.password) return;
+    navigator.clipboard.writeText(resetResult.password).then(() => {
+      setResetCopied(true);
+      setTimeout(() => setResetCopied(false), 2000);
+    });
+  };
+
+  const closeResetModal = () => {
+    if (resetLoading) return;
+    setResetTarget(null);
+    setResetCustom('');
+    setResetResult(null);
+    setResetCopied(false);
   };
 
   if (currentUser?.role !== 'Admin') return <div className="text-center py-12 text-ink-500">Admin access required</div>;
@@ -164,12 +213,21 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3">
-                    {u.id !== currentUser.id && (
-                      <button onClick={() => toggleActive(u.id, u.is_active)}
-                        className={`text-xs px-3 py-1 rounded-lg ${u.is_active ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
-                        {u.is_active ? 'Deactivate' : 'Activate'}
+                    <div className="flex items-center gap-1">
+                      {u.id !== currentUser.id && (
+                        <button onClick={() => toggleActive(u.id, u.is_active)}
+                          className={`text-xs px-3 py-1 rounded-lg ${u.is_active ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'}`}>
+                          {u.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => openResetPassword(u)}
+                        className="text-xs px-3 py-1 rounded-lg text-brand-700 hover:bg-brand-50 flex items-center gap-1"
+                        title="Reset this user's password"
+                      >
+                        <KeyRound className="w-3 h-3" /> Reset password
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -177,6 +235,123 @@ export default function UsersPage() {
           </table>
         </div>
       </div>
+
+      {/* Reset password modal */}
+      {resetTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={closeResetModal}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-full max-w-md space-y-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-ink-900">Reset password</h2>
+                <p className="text-xs text-ink-500">For {resetTarget.first_name} {resetTarget.last_name} · {resetTarget.email}</p>
+              </div>
+            </div>
+
+            {!resetResult ? (
+              <>
+                <div className="flex gap-2 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => setResetMode('auto')}
+                    className={`flex-1 px-3 py-2 rounded-lg border ${resetMode === 'auto' ? 'border-brand-400 bg-brand-50 text-brand-700 font-medium' : 'border-ink-200 text-ink-700'}`}
+                  >
+                    Auto-generate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResetMode('custom')}
+                    className={`flex-1 px-3 py-2 rounded-lg border ${resetMode === 'custom' ? 'border-brand-400 bg-brand-50 text-brand-700 font-medium' : 'border-ink-200 text-ink-700'}`}
+                  >
+                    Set custom
+                  </button>
+                </div>
+
+                {resetMode === 'custom' && (
+                  <div>
+                    <label className="block text-sm font-medium text-ink-700 mb-1">New password</label>
+                    <input
+                      type="text"
+                      value={resetCustom}
+                      onChange={e => setResetCustom(e.target.value)}
+                      placeholder="At least 6 characters"
+                      className="w-full px-4 py-2.5 border border-ink-200 rounded-lg focus:ring-2 focus:ring-brand-300 outline-none font-mono"
+                      disabled={resetLoading}
+                    />
+                  </div>
+                )}
+
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+                  This will overwrite their current password. Share the new password with them through a secure channel.
+                </div>
+
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    disabled={resetLoading}
+                    className="px-4 py-2 text-sm text-ink-600 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitResetPassword}
+                    disabled={resetLoading || (resetMode === 'custom' && resetCustom.length < 6)}
+                    className="px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium disabled:opacity-50 min-w-[140px]"
+                  >
+                    {resetLoading ? 'Resetting…' : 'Reset password'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+                  Password updated. Copy it now — it won't be shown again.
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-ink-500 uppercase tracking-wider mb-1.5">New password</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={resetResult.password}
+                      onClick={e => e.target.select()}
+                      className="flex-1 px-4 py-2.5 bg-ink-50 border border-ink-200 rounded-lg font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={copyPassword}
+                      className="px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-semibold flex items-center gap-1.5 min-w-[100px] justify-center"
+                    >
+                      {resetCopied ? <><Check className="w-4 h-4" /> Copied</> : <><Copy className="w-4 h-4" /> Copy</>}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    className="px-4 py-2 bg-ink-100 hover:bg-ink-200 text-ink-700 rounded-lg text-sm font-medium"
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
