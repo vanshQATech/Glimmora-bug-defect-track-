@@ -668,7 +668,7 @@ Be thorough — steps should be detailed enough for a tester to follow without g
 
 router.post('/fill-test-case', authenticate, async (req, res) => {
   const anthropic = getClient();
-  if (!anthropic) return res.status(503).json({ error: 'AI not configured. Add ANTHROPIC_API_KEY to server .env.' });
+  if (!anthropic) return res.status(503).json({ error: 'AI is not configured on the server (ANTHROPIC_API_KEY missing).' });
 
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
@@ -676,7 +676,7 @@ router.post('/fill-test-case', authenticate, async (req, res) => {
 
   try {
     const response = await anthropic.messages.create({
-      model: MODEL,
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1200,
       system: FILL_TC_SYSTEM,
       messages: [{ role: 'user', content: prompt }],
@@ -707,7 +707,8 @@ router.post('/fill-test-case', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('[AI fill-test-case] error:', err?.message || err);
-    res.status(err?.status || 500).json({ error: err?.message || 'AI request failed' });
+    const status = err?.status || err?.response?.status || 500;
+    res.status(status).json({ error: err?.message || 'AI request failed. Please try again.' });
   }
 });
 

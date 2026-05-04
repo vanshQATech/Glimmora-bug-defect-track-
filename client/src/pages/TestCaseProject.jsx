@@ -246,7 +246,8 @@ export default function TestCaseProject() {
       }));
       setAiAssistFilled(true);
     } catch (err) {
-      setAiAssistError(err.response?.data?.error || 'AI failed. Please try again.');
+      const msg = err.response?.data?.error || err.message || 'AI request failed. Please try again.';
+      setAiAssistError(msg);
     } finally {
       setAiAssistLoading(false);
     }
