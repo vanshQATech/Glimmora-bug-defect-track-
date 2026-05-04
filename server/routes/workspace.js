@@ -243,6 +243,47 @@ router.get('/progress-feed', authenticate, (req, res) => {
   }
 });
 
+// Members with their active projects
+router.get('/members-projects', authenticate, (req, res) => {
+  try {
+    const db = getDb();
+
+    // All active users with task counts and distinct projects they have work tasks in
+    const users = db.prepare(`
+      SELECT u.id, u.first_name, u.last_name, u.email, u.role,
+        COUNT(DISTINCT wt.id) as total_tasks,
+        COUNT(DISTINCT CASE WHEN wt.status != 'Completed' THEN wt.id END) as active_tasks,
+        COUNT(DISTINCT wt.project_id) as project_count
+      FROM users u
+      LEFT JOIN work_tasks wt ON wt.assigned_to = u.id
+      WHERE u.is_active = 1
+      GROUP BY u.id
+      ORDER BY active_tasks DESC, u.first_name ASC
+    `).all();
+
+    // For each user get their distinct projects (with active task counts)
+    const projectsByUser = db.prepare(`
+      SELECT wt.assigned_to as user_id, p.id as project_id, p.name as project_name,
+        COUNT(*) as task_count,
+        COUNT(CASE WHEN wt.status != 'Completed' THEN 1 END) as active_count
+      FROM work_tasks wt
+      JOIN projects p ON wt.project_id = p.id
+      GROUP BY wt.assigned_to, p.id
+      ORDER BY active_count DESC
+    `).all();
+
+    const projectMap = {};
+    for (const r of projectsByUser) {
+      if (!projectMap[r.user_id]) projectMap[r.user_id] = [];
+      projectMap[r.user_id].push({ project_id: r.project_id, project_name: r.project_name, task_count: r.task_count, active_count: r.active_count });
+    }
+
+    res.json(users.map(u => ({ ...u, projects: projectMap[u.id] || [] })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get team activity overview (Admin/PM)
 router.get('/activity', authenticate, (req, res) => {
   try {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { Briefcase, Plus, Clock, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Send, Users, Activity, TrendingUp, Calendar, Filter } from 'lucide-react';
+import { Briefcase, Plus, Clock, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Send, Users, Activity, TrendingUp, Calendar, Filter, FolderOpen } from 'lucide-react';
 
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const STATUSES = ['Pending', 'In Progress', 'On Hold', 'Completed'];
@@ -54,6 +54,9 @@ export default function Workspace() {
   const [feedFrom, setFeedFrom] = useState('');
   const [feedTo, setFeedTo] = useState('');
 
+  // Members + projects state
+  const [membersProjects, setMembersProjects] = useState([]);
+
   const isManager = ['Admin', 'Project Manager'].includes(user?.role);
 
   const fetchTasks = () => {
@@ -85,6 +88,7 @@ export default function Workspace() {
     Promise.all([
       api.get('/workspace/tasks').then(r => setTasks(r.data)),
       api.get('/workspace/activity').then(r => setActivity(r.data)),
+      api.get('/workspace/members-projects').then(r => setMembersProjects(r.data)),
       isManager ? api.get('/users').then(r => setAllUsers(r.data.filter(u => u.is_active))) : Promise.resolve(),
       api.get('/projects').then(r => setProjects(r.data)),
     ]).catch(console.error).finally(() => setLoading(false));
@@ -444,65 +448,112 @@ export default function Workspace() {
 
       {/* Team Activity Tab */}
       {tab === 'activity' && (
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-ink-700">Team Members</h3>
-            <div className="space-y-2">
-              {activity.users?.map(u => (
-                <div key={u.id} className="bg-white card p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-9 h-9 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-sm font-bold">
+        <div className="space-y-6">
+          {/* Members + Projects summary */}
+          <div className="bg-white card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-brand-500" />
+                <h3 className="text-sm font-semibold text-ink-900">Members & Projects</h3>
+              </div>
+              <span className="text-xs text-ink-500">{membersProjects.length} member{membersProjects.length !== 1 ? 's' : ''}</span>
+            </div>
+            {membersProjects.length === 0 ? (
+              <p className="text-sm text-ink-400">No members found</p>
+            ) : (
+              <div className="divide-y divide-ink-50">
+                {membersProjects.map(u => (
+                  <div key={u.id} className="py-3 flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
                       {u.first_name[0]}{u.last_name[0]}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-ink-900">{u.first_name} {u.last_name}</p>
-                      <p className="text-xs text-ink-500">{u.role}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium text-ink-900">{u.first_name} {u.last_name}</span>
+                        <span className="text-xs text-ink-400">{u.role}</span>
+                        <span className="ml-auto text-xs text-ink-500 shrink-0">{u.active_tasks} active task{u.active_tasks !== 1 ? 's' : ''}</span>
+                      </div>
+                      {u.projects.length === 0 ? (
+                        <span className="text-xs text-ink-400 italic">No projects assigned</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {u.projects.map(p => (
+                            <span key={p.project_id} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 font-medium">
+                              <FolderOpen className="w-3 h-3" />
+                              {p.project_name}
+                              <span className="text-brand-400">({p.active_count} active)</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {u.last_activity && (
-                      <span className="text-xs text-ink-400">Last active: {new Date(u.last_activity).toLocaleDateString()}</span>
-                    )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-yellow-50 rounded-lg py-1.5">
-                      <p className="text-lg font-bold text-yellow-600">{u.active_tasks}</p>
-                      <p className="text-xs text-ink-500">Active</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg py-1.5">
-                      <p className="text-lg font-bold text-red-600">{u.overdue_tasks}</p>
-                      <p className="text-xs text-ink-500">Overdue</p>
-                    </div>
-                    <div className="bg-green-50 rounded-lg py-1.5">
-                      <p className="text-lg font-bold text-green-600">{u.completed_tasks}</p>
-                      <p className="text-xs text-ink-500">Done</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {activity.users?.length === 0 && <p className="text-sm text-ink-400">No team members</p>}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-ink-700">Recent Updates</h3>
-            <div className="space-y-2">
-              {activity.recentUpdates?.length === 0 ? (
-                <p className="text-sm text-ink-400">No updates yet</p>
-              ) : activity.recentUpdates?.map(u => (
-                <div key={u.id} className="bg-white card p-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium text-ink-900">{u.user_name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-brand-600">{u.progress_percent}%</span>
-                      <span className="text-xs text-ink-400">{u.update_date}</span>
+          {/* Task stats + recent updates */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-ink-700">Task Overview</h3>
+              <div className="space-y-2">
+                {activity.users?.map(u => (
+                  <div key={u.id} className="bg-white card p-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-9 h-9 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-sm font-bold">
+                        {u.first_name[0]}{u.last_name[0]}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-ink-900">{u.first_name} {u.last_name}</p>
+                        <p className="text-xs text-ink-500">{u.role}</p>
+                      </div>
+                      {u.last_activity && (
+                        <span className="text-xs text-ink-400">Last active: {new Date(u.last_activity).toLocaleDateString()}</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-yellow-50 rounded-lg py-1.5">
+                        <p className="text-lg font-bold text-yellow-600">{u.active_tasks}</p>
+                        <p className="text-xs text-ink-500">Active</p>
+                      </div>
+                      <div className="bg-red-50 rounded-lg py-1.5">
+                        <p className="text-lg font-bold text-red-600">{u.overdue_tasks}</p>
+                        <p className="text-xs text-ink-500">Overdue</p>
+                      </div>
+                      <div className="bg-green-50 rounded-lg py-1.5">
+                        <p className="text-lg font-bold text-green-600">{u.completed_tasks}</p>
+                        <p className="text-xs text-ink-500">Done</p>
+                      </div>
                     </div>
                   </div>
-                  <p className="text-xs text-ink-500 mb-1">on: {u.task_title}</p>
-                  <p className="text-sm text-ink-700">{u.update_text}</p>
-                  {u.blockers && (
-                    <p className="text-xs text-red-600 mt-1"><AlertTriangle className="w-3 h-3 inline mr-1" />{u.blockers}</p>
-                  )}
-                </div>
-              ))}
+                ))}
+                {activity.users?.length === 0 && <p className="text-sm text-ink-400">No team members</p>}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-ink-700">Recent Updates</h3>
+              <div className="space-y-2">
+                {activity.recentUpdates?.length === 0 ? (
+                  <p className="text-sm text-ink-400">No updates yet</p>
+                ) : activity.recentUpdates?.map(u => (
+                  <div key={u.id} className="bg-white card p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-ink-900">{u.user_name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-brand-600">{u.progress_percent}%</span>
+                        <span className="text-xs text-ink-400">{u.update_date}</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-ink-500 mb-1">on: {u.task_title}</p>
+                    <p className="text-sm text-ink-700">{u.update_text}</p>
+                    {u.blockers && (
+                      <p className="text-xs text-red-600 mt-1"><AlertTriangle className="w-3 h-3 inline mr-1" />{u.blockers}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
