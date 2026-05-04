@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../database');
+const { getDb, flushSnapshotNow } = require('../database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { sendInviteEmail, sendNotificationEmail } = require('../utils/mailer');
 
@@ -33,7 +33,7 @@ router.get('/:id', authenticate, (req, res) => {
 });
 
 // Update user profile
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
     if (req.user.id !== req.params.id && req.user.role !== 'Admin') {
       return res.status(403).json({ error: 'Cannot edit other users' });
@@ -42,13 +42,30 @@ router.put('/:id', authenticate, (req, res) => {
     const { first_name, last_name, password } = req.body;
     const db = getDb();
 
+    // Build UPDATE dynamically — only set fields that were actually provided.
+    // (sql.js does not handle undefined parameters reliably, so we never bind them.)
+    const sets = [];
+    const params = [];
+    if (typeof first_name === 'string') { sets.push('first_name = ?'); params.push(first_name); }
+    if (typeof last_name === 'string')  { sets.push('last_name = ?');  params.push(last_name);  }
+    let passwordChanged = false;
     if (password) {
-      const hashed = bcrypt.hashSync(password, 10);
-      db.prepare('UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), password = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(first_name, last_name, hashed, req.params.id);
-    } else {
-      db.prepare('UPDATE users SET first_name = COALESCE(?, first_name), last_name = COALESCE(?, last_name), updated_at = datetime(\'now\') WHERE id = ?')
-        .run(first_name, last_name, req.params.id);
+      sets.push('password = ?');
+      params.push(bcrypt.hashSync(password, 10));
+      passwordChanged = true;
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
+
+    sets.push("updated_at = datetime('now')");
+    params.push(req.params.id);
+    db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+    if (passwordChanged) {
+      // Flush to Postgres immediately so password change survives restart
+      await flushSnapshotNow();
     }
 
     const user = db.prepare('SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = ?').get(req.params.id);
@@ -78,7 +95,7 @@ router.put('/:id/role', authenticate, authorize('Admin'), (req, res) => {
 
 // Reset another user's password (admin only). If no password is provided,
 // generate a strong random one and return it so the admin can share it.
-router.post('/:id/reset-password', authenticate, authorize('Admin'), (req, res) => {
+router.post('/:id/reset-password', authenticate, authorize('Admin'), async (req, res) => {
   try {
     const db = getDb();
     const target = db.prepare('SELECT id, email FROM users WHERE id = ?').get(req.params.id);
@@ -103,6 +120,8 @@ router.post('/:id/reset-password', authenticate, authorize('Admin'), (req, res) 
 
     const hashed = bcrypt.hashSync(password, 10);
     db.prepare("UPDATE users SET password = ?, updated_at = datetime('now') WHERE id = ?").run(hashed, target.id);
+    // Flush to Postgres immediately so password change survives restart
+    await flushSnapshotNow();
 
     res.json({
       message: 'Password reset successfully. Share this password with the user — it will not be shown again.',

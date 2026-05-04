@@ -501,4 +501,4 @@ async function initializeDatabase() {
   return db;
 }
 
-module.exports = { getDb, initializeDatabase };
+module.exports = { getDb, initializeDatabase, flushSnapshotNow };

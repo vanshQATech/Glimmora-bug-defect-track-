@@ -2,14 +2,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../database');
+const { getDb, flushSnapshotNow } = require('../database');
 const { authenticate } = require('../middleware/auth');
 const { sendPasswordResetEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
 // Register
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   try {
     const { email, password, first_name, last_name, invitation_token } = req.body;
     if (!email || !password || !first_name || !last_name) {
@@ -48,6 +48,9 @@ router.post('/register', (req, res) => {
         }
       }
     }
+
+    // Flush to Postgres immediately so the new account survives restart
+    await flushSnapshotNow();
 
     const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
     const user = db.prepare('SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = ?').get(userId);
@@ -141,7 +144,7 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // Reset password — validate token and update password
-router.post('/reset-password', (req, res) => {
+router.post('/reset-password', async (req, res) => {
   try {
     const { token, password } = req.body;
     if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
@@ -158,6 +161,8 @@ router.post('/reset-password', (req, res) => {
     const hashedPassword = bcrypt.hashSync(password, 10);
     db.prepare('UPDATE users SET password = ?, updated_at = datetime(\'now\') WHERE id = ?').run(hashedPassword, record.user_id);
     db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE id = ?').run(record.id);
+    // Flush to Postgres immediately so password change survives restart
+    await flushSnapshotNow();
 
     res.json({ message: 'Password updated successfully. You can now log in.' });
   } catch (err) {
