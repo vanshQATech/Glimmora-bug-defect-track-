@@ -4,11 +4,42 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Global dashboard stats
+// Dashboard stats — scoped by user permissions:
+//   Admin sees everything; everyone else only sees projects they're a member of.
 router.get('/stats', authenticate, (req, res) => {
   try {
     const db = getDb();
+    const isAdmin = req.user.role === 'Admin';
 
+    // Resolve which project IDs this user is allowed to see
+    let allowedProjectIds = null; // null = no restriction (admin)
+    if (!isAdmin) {
+      const rows = db.prepare('SELECT project_id FROM project_members WHERE user_id = ?').all(req.user.id);
+      allowedProjectIds = rows.map(r => r.project_id);
+
+      // User has no projects — return all-zero stats
+      if (allowedProjectIds.length === 0) {
+        return res.json({
+          bugs: { total: 0, new_count: 0, open: 0, in_progress: 0, fixed: 0, failed: 0, done: 0, active: 0, critical: 0 },
+          statusBreakdown: {},
+          tasks: { total: 0, todo: 0, in_progress: 0, done: 0, blocked: 0, overdue: 0 },
+          projects: 0,
+          users: 0,
+          myBugs: 0,
+          myTasks: 0,
+          recentActivity: [],
+        });
+      }
+    }
+
+    // Build a "project_id IN (...)" filter (or empty string for admin)
+    const projScope = (col = 'project_id') => {
+      if (allowedProjectIds === null) return { sql: '', params: [] };
+      const placeholders = allowedProjectIds.map(() => '?').join(',');
+      return { sql: ` AND ${col} IN (${placeholders})`, params: allowedProjectIds };
+    };
+
+    const bugScope = projScope('project_id');
     const bugStats = db.prepare(`
       SELECT
         COUNT(*) as total,
@@ -21,11 +52,15 @@ router.get('/stats', authenticate, (req, res) => {
         SUM(CASE WHEN status != 'Approved by PM' THEN 1 ELSE 0 END) as active,
         SUM(CASE WHEN priority = 'Critical' AND status != 'Approved by PM' THEN 1 ELSE 0 END) as critical
       FROM bugs
-    `).get();
+      WHERE 1=1 ${bugScope.sql}
+    `).get(...bugScope.params);
 
-    const statusRows = db.prepare('SELECT status, COUNT(*) as count FROM bugs GROUP BY status').all();
+    const statusRows = db.prepare(`
+      SELECT status, COUNT(*) as count FROM bugs WHERE 1=1 ${bugScope.sql} GROUP BY status
+    `).all(...bugScope.params);
     const statusBreakdown = Object.fromEntries(statusRows.map(r => [r.status, r.count]));
 
+    const taskScope = projScope('project_id');
     const taskStats = db.prepare(`
       SELECT
         COUNT(*) as total,
@@ -35,21 +70,46 @@ router.get('/stats', authenticate, (req, res) => {
         SUM(CASE WHEN status = 'Blocked' THEN 1 ELSE 0 END) as blocked,
         SUM(CASE WHEN due_date < datetime('now') AND status != 'Done' THEN 1 ELSE 0 END) as overdue
       FROM tasks
-    `).get();
+      WHERE 1=1 ${taskScope.sql}
+    `).get(...taskScope.params);
 
-    const projectCount = db.prepare("SELECT COUNT(*) as count FROM projects WHERE status = 'Active'").get();
+    // Project count — projects use `id`, not `project_id`
+    const projectCount = (() => {
+      if (allowedProjectIds === null) {
+        return db.prepare("SELECT COUNT(*) as count FROM projects WHERE status = 'Active'").get();
+      }
+      const placeholders = allowedProjectIds.map(() => '?').join(',');
+      return db.prepare(`SELECT COUNT(*) as count FROM projects WHERE status = 'Active' AND id IN (${placeholders})`).get(...allowedProjectIds);
+    })();
+
     const userCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get();
 
-    // My work
+    // My work — already user-scoped, no project filter needed
     const myBugs = db.prepare('SELECT COUNT(*) as count FROM bugs WHERE assignee_id = ? AND status != ?').get(req.user.id, 'Approved by PM');
     const myTasks = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE assignee_id = ? AND status != ?').get(req.user.id, 'Done');
 
-    // Recent activity
-    const recentActivity = db.prepare(`
-      SELECT al.*, u.first_name || ' ' || u.last_name as user_name
-      FROM audit_log al JOIN users u ON al.user_id = u.id
-      ORDER BY al.created_at DESC LIMIT 20
-    `).all();
+    // Recent activity — scope through the entity's project for non-admins
+    let recentActivity;
+    if (allowedProjectIds === null) {
+      recentActivity = db.prepare(`
+        SELECT al.*, u.first_name || ' ' || u.last_name as user_name
+        FROM audit_log al JOIN users u ON al.user_id = u.id
+        ORDER BY al.created_at DESC LIMIT 20
+      `).all();
+    } else {
+      const ph = allowedProjectIds.map(() => '?').join(',');
+      recentActivity = db.prepare(`
+        SELECT al.*, u.first_name || ' ' || u.last_name as user_name
+        FROM audit_log al
+        JOIN users u ON al.user_id = u.id
+        WHERE
+          al.user_id = ?
+          OR (al.entity_type = 'bug'     AND EXISTS (SELECT 1 FROM bugs    WHERE id = al.entity_id AND project_id IN (${ph})))
+          OR (al.entity_type = 'task'    AND EXISTS (SELECT 1 FROM tasks   WHERE id = al.entity_id AND project_id IN (${ph})))
+          OR (al.entity_type = 'project' AND al.entity_id IN (${ph}))
+        ORDER BY al.created_at DESC LIMIT 20
+      `).all(req.user.id, ...allowedProjectIds, ...allowedProjectIds, ...allowedProjectIds);
+    }
 
     res.json({
       bugs: bugStats,
