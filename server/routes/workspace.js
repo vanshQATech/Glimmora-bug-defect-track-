@@ -156,7 +156,7 @@ router.put('/tasks/:id', authenticate, (req, res) => {
 // Submit daily update
 router.post('/tasks/:id/updates', authenticate, (req, res) => {
   try {
-    const { update_text, progress_percent, blockers } = req.body;
+    const { update_text, progress_percent, blockers, update_date } = req.body;
     if (!update_text) return res.status(400).json({ error: 'Update text is required' });
 
     const db = getDb();
@@ -165,11 +165,12 @@ router.post('/tasks/:id/updates', authenticate, (req, res) => {
 
     const updateId = uuidv4();
     const today = new Date().toISOString().split('T')[0];
+    const entryDate = update_date || today;
 
     db.prepare(`
       INSERT INTO daily_updates (id, work_task_id, user_id, update_text, progress_percent, blockers, update_date)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(updateId, req.params.id, req.user.id, update_text, progress_percent || 0, blockers || '', today);
+    `).run(updateId, req.params.id, req.user.id, update_text, progress_percent || 0, blockers || '', entryDate);
 
     // Update task status based on progress
     if (progress_percent >= 100) {
@@ -194,6 +195,49 @@ router.post('/tasks/:id/updates', authenticate, (req, res) => {
     `).get(updateId);
 
     res.status(201).json(update);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Progress feed — filterable by user, project, date range
+router.get('/progress-feed', authenticate, (req, res) => {
+  try {
+    const db = getDb();
+    const { user_id, project_id, from_date, to_date } = req.query;
+    const isManager = ['Admin', 'Project Manager'].includes(req.user.role);
+
+    let query = `
+      SELECT du.*,
+        u.first_name || ' ' || u.last_name as user_name,
+        u.first_name as user_first_name,
+        u.last_name as user_last_name,
+        wt.title as task_title,
+        wt.project_id,
+        p.name as project_name
+      FROM daily_updates du
+      JOIN users u ON du.user_id = u.id
+      JOIN work_tasks wt ON du.work_task_id = wt.id
+      LEFT JOIN projects p ON wt.project_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (!isManager) {
+      query += ' AND du.user_id = ?';
+      params.push(req.user.id);
+    } else if (user_id) {
+      query += ' AND du.user_id = ?';
+      params.push(user_id);
+    }
+
+    if (project_id) { query += ' AND wt.project_id = ?'; params.push(project_id); }
+    if (from_date)  { query += ' AND du.update_date >= ?'; params.push(from_date); }
+    if (to_date)    { query += ' AND du.update_date <= ?'; params.push(to_date); }
+
+    query += ' ORDER BY du.update_date DESC, du.created_at DESC LIMIT 200';
+
+    res.json(db.prepare(query).all(...params));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

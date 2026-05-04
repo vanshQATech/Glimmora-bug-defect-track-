@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { Briefcase, Plus, Clock, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Send, Users, Activity } from 'lucide-react';
+import { Briefcase, Plus, Clock, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Send, Users, Activity, TrendingUp, Calendar, Filter } from 'lucide-react';
 
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const STATUSES = ['Pending', 'In Progress', 'On Hold', 'Completed'];
@@ -16,6 +16,19 @@ const statusColor = (s) => {
   return map[s] || 'bg-ink-100 text-ink-700';
 };
 
+const progressColor = (pct) => {
+  if (pct >= 100) return 'bg-green-500';
+  if (pct >= 60) return 'bg-blue-500';
+  if (pct >= 30) return 'bg-yellow-500';
+  return 'bg-red-400';
+};
+
+const avatar = (firstName, lastName) => (
+  <div className="w-8 h-8 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
+    {(firstName?.[0] || '').toUpperCase()}{(lastName?.[0] || '').toUpperCase()}
+  </div>
+);
+
 export default function Workspace() {
   const { user } = useAuth();
   const [tab, setTab] = useState('tasks');
@@ -27,9 +40,19 @@ export default function Workspace() {
   const [filterUser, setFilterUser] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedTask, setExpandedTask] = useState(null);
-  const [updateForm, setUpdateForm] = useState({ update_text: '', progress_percent: 0, blockers: '' });
+
+  const today = new Date().toISOString().split('T')[0];
+  const [updateForm, setUpdateForm] = useState({ update_text: '', progress_percent: 0, blockers: '', update_date: today });
   const [taskForm, setTaskForm] = useState({ title: '', description: '', assigned_to: '', project_id: '', priority: 'Medium', deadline: '' });
   const [loading, setLoading] = useState(true);
+
+  // Progress feed state
+  const [feedUpdates, setFeedUpdates] = useState([]);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedUser, setFeedUser] = useState('');
+  const [feedProject, setFeedProject] = useState('');
+  const [feedFrom, setFeedFrom] = useState('');
+  const [feedTo, setFeedTo] = useState('');
 
   const isManager = ['Admin', 'Project Manager'].includes(user?.role);
 
@@ -44,6 +67,19 @@ export default function Workspace() {
     api.get('/workspace/activity').then(r => setActivity(r.data)).catch(console.error);
   };
 
+  const fetchFeed = () => {
+    setFeedLoading(true);
+    const params = {};
+    if (feedUser) params.user_id = feedUser;
+    if (feedProject) params.project_id = feedProject;
+    if (feedFrom) params.from_date = feedFrom;
+    if (feedTo) params.to_date = feedTo;
+    api.get('/workspace/progress-feed', { params })
+      .then(r => setFeedUpdates(r.data))
+      .catch(console.error)
+      .finally(() => setFeedLoading(false));
+  };
+
   const fetchAll = () => {
     setLoading(true);
     Promise.all([
@@ -56,6 +92,7 @@ export default function Workspace() {
 
   useEffect(() => { fetchAll(); }, []);
   useEffect(() => { fetchTasks(); }, [filterStatus, filterUser]);
+  useEffect(() => { if (tab === 'feed') fetchFeed(); }, [tab, feedUser, feedProject, feedFrom, feedTo]);
 
   const createTask = async (e) => {
     e.preventDefault();
@@ -77,9 +114,8 @@ export default function Workspace() {
   const submitUpdate = async (taskId) => {
     try {
       await api.post(`/workspace/tasks/${taskId}/updates`, updateForm);
-      setUpdateForm({ update_text: '', progress_percent: 0, blockers: '' });
+      setUpdateForm({ update_text: '', progress_percent: 0, blockers: '', update_date: today });
       fetchAll();
-      // Reload expanded task
       const r = await api.get(`/workspace/tasks/${taskId}`);
       setExpandedTask(r.data);
     } catch (err) { alert(err.response?.data?.error || 'Failed'); }
@@ -93,7 +129,6 @@ export default function Workspace() {
     } catch (err) { console.error(err); }
   };
 
-  const today = new Date().toISOString().split('T')[0];
   const overdueTasks = tasks.filter(t => t.deadline < today && t.status !== 'Completed');
   const pendingTasks = tasks.filter(t => t.status === 'Pending');
   const inProgressTasks = tasks.filter(t => t.status === 'In Progress');
@@ -110,7 +145,7 @@ export default function Workspace() {
         </div>
         {isManager && (
           <button onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-brand-gradient text-white rounded-lg  text-sm font-medium">
+            className="flex items-center gap-2 px-4 py-2.5 bg-brand-gradient text-white rounded-lg text-sm font-medium">
             <Plus className="w-4 h-4" /> Assign Work
           </button>
         )}
@@ -152,6 +187,7 @@ export default function Workspace() {
       <div className="flex items-center gap-4 border-b border-ink-100">
         {[
           { key: 'tasks', label: 'Work Tasks', icon: Briefcase },
+          { key: 'feed', label: 'Progress Feed', icon: TrendingUp },
           { key: 'activity', label: 'Team Activity', icon: Users },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -164,7 +200,6 @@ export default function Workspace() {
       {/* Work Tasks Tab */}
       {tab === 'tasks' && (
         <div className="space-y-4">
-          {/* Filters */}
           <div className="flex flex-wrap items-center gap-3">
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none">
@@ -180,7 +215,6 @@ export default function Workspace() {
             )}
           </div>
 
-          {/* Task List */}
           <div className="space-y-3">
             {tasks.length === 0 ? (
               <div className="bg-white card p-12 text-center text-ink-400">
@@ -209,17 +243,15 @@ export default function Workspace() {
                     className={`text-xs px-2 py-1 rounded-full border-0 outline-none cursor-pointer ${statusColor(t.status)}`}>
                     {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  {/* Progress bar */}
                   <div className="w-20 flex items-center gap-1">
                     <div className="flex-1 h-2 bg-ink-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${t.latest_progress || 0}%` }} />
+                      <div className={`h-full rounded-full transition-all ${progressColor(t.latest_progress || 0)}`} style={{ width: `${t.latest_progress || 0}%` }} />
                     </div>
                     <span className="text-xs text-ink-500 w-8 text-right">{t.latest_progress || 0}%</span>
                   </div>
                   {expandedTask?.id === t.id ? <ChevronUp className="w-4 h-4 text-ink-400" /> : <ChevronDown className="w-4 h-4 text-ink-400" />}
                 </div>
 
-                {/* Expanded: Details + Updates */}
                 {expandedTask?.id === t.id && (
                   <div className="border-t border-ink-100 px-5 py-4 space-y-4 bg-ink-50">
                     {t.description && (
@@ -229,7 +261,6 @@ export default function Workspace() {
                       </div>
                     )}
 
-                    {/* Daily Updates */}
                     <div>
                       <h4 className="text-xs font-medium text-ink-500 mb-2">Daily Updates ({expandedTask.updates?.length || 0})</h4>
                       {expandedTask.updates?.length === 0 ? (
@@ -241,9 +272,9 @@ export default function Workspace() {
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-medium text-ink-900">{u.user_name}</span>
-                                  <span className="text-xs text-ink-400">{u.update_date}</span>
+                                  <span className="text-xs text-ink-400 flex items-center gap-1"><Calendar className="w-3 h-3" />{u.update_date}</span>
                                 </div>
-                                <span className="text-xs font-medium text-brand-600">{u.progress_percent}%</span>
+                                <span className="text-xs font-semibold text-brand-600">{u.progress_percent}%</span>
                               </div>
                               <p className="text-sm text-ink-700">{u.update_text}</p>
                               {u.blockers && (
@@ -255,19 +286,24 @@ export default function Workspace() {
                       )}
                     </div>
 
-                    {/* Submit Daily Update */}
                     {(t.assigned_to === user.id || isManager) && t.status !== 'Completed' && (
                       <div className="bg-white rounded-lg border border-ink-100 p-4 space-y-3">
                         <h4 className="text-sm font-medium text-ink-700">Submit Daily Update</h4>
                         <textarea value={updateForm.update_text} onChange={e => setUpdateForm({ ...updateForm, update_text: e.target.value })}
-                          placeholder="What did you work on today?"
+                          placeholder="What did you work on?"
                           rows={2} className="w-full px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-300" />
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs text-ink-500 mb-1">Date</label>
+                            <input type="date" value={updateForm.update_date}
+                              onChange={e => setUpdateForm({ ...updateForm, update_date: e.target.value })}
+                              className="w-full px-3 py-1.5 border border-ink-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-300" />
+                          </div>
                           <div>
                             <label className="block text-xs text-ink-500 mb-1">Progress ({updateForm.progress_percent}%)</label>
                             <input type="range" min="0" max="100" step="5" value={updateForm.progress_percent}
                               onChange={e => setUpdateForm({ ...updateForm, progress_percent: parseInt(e.target.value) })}
-                              className="w-full" />
+                              className="w-full mt-2" />
                           </div>
                           <div>
                             <label className="block text-xs text-ink-500 mb-1">Blockers (optional)</label>
@@ -277,7 +313,7 @@ export default function Workspace() {
                           </div>
                         </div>
                         <button onClick={() => submitUpdate(t.id)} disabled={!updateForm.update_text.trim()}
-                          className="flex items-center gap-2 px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium  disabled:opacity-50">
+                          className="flex items-center gap-2 px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium disabled:opacity-50">
                           <Send className="w-4 h-4" /> Submit Update
                         </button>
                       </div>
@@ -290,10 +326,125 @@ export default function Workspace() {
         </div>
       )}
 
+      {/* Progress Feed Tab */}
+      {tab === 'feed' && (
+        <div className="space-y-4">
+          {/* Filters */}
+          <div className="bg-white card p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Filter className="w-4 h-4 text-ink-500" />
+              <span className="text-sm font-medium text-ink-700">Filter Progress</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {isManager && (
+                <div>
+                  <label className="block text-xs text-ink-500 mb-1">Team Member</label>
+                  <select value={feedUser} onChange={e => setFeedUser(e.target.value)}
+                    className="w-full px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none">
+                    <option value="">All Members</option>
+                    {allUsers.map(u => <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs text-ink-500 mb-1">Project</label>
+                <select value={feedProject} onChange={e => setFeedProject(e.target.value)}
+                  className="w-full px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none">
+                  <option value="">All Projects</option>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-ink-500 mb-1">From Date</label>
+                <input type="date" value={feedFrom} onChange={e => setFeedFrom(e.target.value)}
+                  className="w-full px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-ink-500 mb-1">To Date</label>
+                <input type="date" value={feedTo} onChange={e => setFeedTo(e.target.value)}
+                  className="w-full px-3 py-2 border border-ink-200 rounded-lg text-sm outline-none" />
+              </div>
+            </div>
+            {(feedUser || feedProject || feedFrom || feedTo) && (
+              <button onClick={() => { setFeedUser(''); setFeedProject(''); setFeedFrom(''); setFeedTo(''); }}
+                className="mt-3 text-xs text-brand-600 hover:underline">
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          {/* Feed */}
+          {feedLoading ? (
+            <div className="text-center py-8 text-ink-400 text-sm">Loading...</div>
+          ) : feedUpdates.length === 0 ? (
+            <div className="bg-white card p-12 text-center text-ink-400">
+              <TrendingUp className="w-10 h-10 mx-auto mb-2" />
+              <p>No progress updates found</p>
+              {(feedUser || feedProject || feedFrom || feedTo) && (
+                <p className="text-xs mt-1">Try adjusting your filters</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Group by date */}
+              {Object.entries(
+                feedUpdates.reduce((acc, u) => {
+                  if (!acc[u.update_date]) acc[u.update_date] = [];
+                  acc[u.update_date].push(u);
+                  return acc;
+                }, {})
+              ).map(([date, entries]) => (
+                <div key={date}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Calendar className="w-4 h-4 text-ink-400" />
+                    <span className="text-xs font-semibold text-ink-500 uppercase tracking-wide">
+                      {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </span>
+                    <div className="flex-1 h-px bg-ink-100" />
+                    <span className="text-xs text-ink-400">{entries.length} update{entries.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="space-y-2 pl-7">
+                    {entries.map(u => (
+                      <div key={u.id} className="bg-white card p-4">
+                        <div className="flex items-start gap-3">
+                          {avatar(u.user_first_name, u.user_last_name)}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-ink-900">{u.user_name}</span>
+                                {u.project_name && (
+                                  <span className="text-xs px-2 py-0.5 bg-brand-50 text-brand-700 rounded-full font-medium">{u.project_name}</span>
+                                )}
+                                <span className="text-xs text-ink-400">on: {u.task_title}</span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-xs font-semibold text-ink-700">{u.progress_percent}%</span>
+                                <div className="w-16 h-2 bg-ink-200 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${progressColor(u.progress_percent)}`} style={{ width: `${u.progress_percent}%` }} />
+                                </div>
+                              </div>
+                            </div>
+                            <p className="text-sm text-ink-700 mb-1">{u.update_text}</p>
+                            {u.blockers && (
+                              <p className="text-xs text-red-600 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" /> Blocker: {u.blockers}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Team Activity Tab */}
       {tab === 'activity' && (
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Team Members Overview */}
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-ink-700">Team Members</h3>
             <div className="space-y-2">
@@ -331,7 +482,6 @@ export default function Workspace() {
             </div>
           </div>
 
-          {/* Recent Updates Feed */}
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-ink-700">Recent Updates</h3>
             <div className="space-y-2">
@@ -407,7 +557,7 @@ export default function Workspace() {
             </div>
             <div className="flex gap-3 justify-end pt-2">
               <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-sm text-ink-600">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium ">Assign Work</button>
+              <button type="submit" className="px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium">Assign Work</button>
             </div>
           </form>
         </div>
