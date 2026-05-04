@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api, { API_BASE } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { Activity as ActivityIcon, Users, ClipboardList, AlertTriangle, CheckCircle2, Clock, Filter, Plus, Trash2, Download, BarChart3, PieChart as PieIcon, LineChart as LineIcon, FileText } from 'lucide-react';
+import { Activity as ActivityIcon, Users, ClipboardList, AlertTriangle, CheckCircle2, Clock, Filter, Plus, Trash2, Download, BarChart3, PieChart as PieIcon, LineChart as LineIcon, FileText, X } from 'lucide-react';
 
 const STATUSES = ['Completed', 'In Progress', 'Blocked'];
 const LEAD_ROLES = ['Admin', 'Project Manager', 'Team Lead'];
@@ -440,6 +440,7 @@ export default function ActivityPage() {
 
   const [filters, setFilters] = useState({ from: '', to: '', user_id: '', project_id: '', status: '' });
   const [charts, setCharts] = useState(null);
+  const [selectedUpdate, setSelectedUpdate] = useState(null);
 
   const loadProjects = () => api.get('/projects').then(r => setProjects(r.data || [])).catch(() => {});
   const loadUsers = () => api.get('/users').then(r => setUsers(r.data || [])).catch(() => {});
@@ -671,7 +672,8 @@ export default function ActivityPage() {
                   </thead>
                   <tbody>
                     {teamUpdates.map(u => (
-                      <tr key={u.id} className="border-t border-ink-100 hover:bg-ink-50/50">
+                      <tr key={u.id} onClick={() => setSelectedUpdate(u)}
+                        className="border-t border-ink-100 hover:bg-brand-50/40 cursor-pointer transition-colors">
                         <td className="px-4 py-2 font-mono text-xs text-ink-600">{u.update_date}</td>
                         <td className="px-4 py-2 font-medium text-ink-900">{u.employee_name}</td>
                         <td className="px-4 py-2 text-ink-600">{u.project_name || '—'}</td>
@@ -680,7 +682,8 @@ export default function ActivityPage() {
                         <td className="px-4 py-2"><ProgressBar value={u.progress_percent} /></td>
                         <td className="px-4 py-2 text-ink-600 max-w-[200px] truncate" title={u.blockers || ''}>{u.blockers || '—'}</td>
                         <td className="px-4 py-2 text-right">
-                          <button onClick={() => handleDelete(u.id)} className="p-1.5 text-ink-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                          <button onClick={e => { e.stopPropagation(); handleDelete(u.id); }}
+                            className="p-1.5 text-ink-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </td>
@@ -696,6 +699,33 @@ export default function ActivityPage() {
             <h3 className="text-sm font-semibold text-ink-700 mb-3">Full entries</h3>
             <div className="space-y-3">
               {teamUpdates.map(u => <UpdateRow key={u.id} row={u} showEmployee onDelete={handleDelete} />)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Update detail modal */}
+      {selectedUpdate && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto"
+          onClick={() => setSelectedUpdate(null)}>
+          <div className="w-full max-w-2xl mt-10 mb-10" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-ink-100">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-semibold text-ink-900">{selectedUpdate.employee_name}</span>
+                  {selectedUpdate.project_name && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-brand-50 text-brand-600 font-medium">{selectedUpdate.project_name}</span>
+                  )}
+                  <span className="text-xs font-mono text-ink-400">{selectedUpdate.update_date}</span>
+                </div>
+                <button onClick={() => setSelectedUpdate(null)}
+                  className="p-1.5 text-ink-400 hover:text-ink-700 hover:bg-ink-100 rounded-lg">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-5">
+                <UpdateRow row={selectedUpdate} showEmployee={false} />
+              </div>
             </div>
           </div>
         </div>
