@@ -472,6 +472,13 @@ export default function Workspace() {
                         <span className="text-sm font-medium text-ink-900">{u.first_name} {u.last_name}</span>
                         <span className="text-xs text-ink-400">{u.role}</span>
                         <span className="ml-auto text-xs text-ink-500 shrink-0">{u.active_tasks} active task{u.active_tasks !== 1 ? 's' : ''}</span>
+                        {isManager && (
+                          <button
+                            onClick={() => { setTaskForm(f => ({ ...f, assigned_to: u.id })); setShowCreateModal(true); }}
+                            className="flex items-center gap-1 text-xs px-2 py-0.5 bg-brand-gradient text-white rounded-full font-medium shrink-0">
+                            <Plus className="w-3 h-3" /> Assign
+                          </button>
+                        )}
                       </div>
                       {u.projects.length === 0 ? (
                         <span className="text-xs text-ink-400 italic">No projects assigned</span>
@@ -561,9 +568,15 @@ export default function Workspace() {
 
       {/* Create Work Task Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowCreateModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setShowCreateModal(false); setTaskForm({ title: '', description: '', assigned_to: '', project_id: '', priority: 'Medium', deadline: '' }); }}>
           <form onClick={e => e.stopPropagation()} onSubmit={createTask} className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4">
-            <h2 className="text-lg font-semibold">Assign Work Task</h2>
+            <h2 className="text-lg font-semibold">Assign Work Task
+              {taskForm.assigned_to && allUsers.find(u => u.id === taskForm.assigned_to) && (
+                <span className="ml-2 text-sm font-normal text-brand-600">
+                  → {allUsers.find(u => u.id === taskForm.assigned_to)?.first_name} {allUsers.find(u => u.id === taskForm.assigned_to)?.last_name}
+                </span>
+              )}
+            </h2>
             <div>
               <label className="block text-sm font-medium text-ink-700 mb-1">Title *</label>
               <input type="text" value={taskForm.title} onChange={e => setTaskForm({ ...taskForm, title: e.target.value })} required
@@ -607,7 +620,7 @@ export default function Workspace() {
               </div>
             </div>
             <div className="flex gap-3 justify-end pt-2">
-              <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-sm text-ink-600">Cancel</button>
+              <button type="button" onClick={() => { setShowCreateModal(false); setTaskForm({ title: '', description: '', assigned_to: '', project_id: '', priority: 'Medium', deadline: '' }); }} className="px-4 py-2 text-sm text-ink-600">Cancel</button>
               <button type="submit" className="px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium">Assign Work</button>
             </div>
           </form>
