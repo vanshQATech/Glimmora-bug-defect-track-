@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api, { API_BASE } from '../utils/api';
 import { jsPDF } from 'jspdf';
@@ -8,8 +8,71 @@ import StatusChip, { PriorityChip } from '../components/StatusChip';
 import { BUG_STATUSES, TASK_STATUSES, PRIORITIES, SEVERITIES } from '../utils/constants';
 import {
   Plus, Bug, CheckSquare, Users, Search, Download, ArrowLeft, UserPlus, Mail,
-  X, Layers, List, Calendar, FolderKanban, Trash2, BarChart3, Edit3, Save
+  X, Layers, List, Calendar, FolderKanban, Trash2, BarChart3, Edit3, Save,
+  ChevronDown, Check
 } from 'lucide-react';
+
+function MultiSelectFilter({ label, options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const toggle = (v) => {
+    const next = new Set(selected);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    onChange(next);
+  };
+
+  const count = selected.size;
+  const buttonText = count === 0 ? `All ${label}` : `${label} (${count})`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="input w-auto flex items-center gap-2 cursor-pointer hover:bg-ink-50"
+      >
+        <span className={count === 0 ? 'text-ink-500' : 'text-ink-900 font-medium'}>{buttonText}</span>
+        <ChevronDown className={`w-4 h-4 text-ink-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 left-0 min-w-[220px] max-h-[320px] overflow-y-auto bg-white border border-ink-200 rounded-lg shadow-pop">
+          {count > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange(new Set())}
+              className="w-full text-left px-3 py-2 text-xs text-brand-700 hover:bg-brand-50 font-medium border-b border-ink-100"
+            >
+              Clear all
+            </button>
+          )}
+          {options.map(opt => {
+            const checked = selected.has(opt);
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => toggle(opt)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-ink-50 text-left"
+              >
+                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${checked ? 'bg-brand-gradient border-transparent' : 'border-ink-300 bg-white'}`}>
+                  {checked && <Check className="w-3 h-3 text-white" />}
+                </span>
+                <span className="text-ink-800">{opt}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const KANBAN_COLUMNS = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed'];
 
@@ -131,8 +194,8 @@ export default function ProjectDetail() {
   const [tab, setTab] = useState('bugs');
   const [taskView, setTaskView] = useState('board');
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterPriority, setFilterPriority] = useState('');
+  const [filterStatuses, setFilterStatuses] = useState(() => new Set());
+  const [filterPriorities, setFilterPriorities] = useState(() => new Set());
   const [filterAssignee, setFilterAssignee] = useState('');
   const [showBugModal, setShowBugModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -153,12 +216,28 @@ export default function ProjectDetail() {
 
   const fetchAll = () => {
     api.get(`/projects/${projectId}`).then(r => setProject(r.data)).catch(() => navigate('/projects'));
-    api.get(`/bugs/project/${projectId}`, { params: { search, status: filterStatus, priority: filterPriority, assignee_id: filterAssignee } }).then(r => setBugs(r.data));
-    api.get(`/tasks/project/${projectId}`, { params: { search, status: filterStatus, priority: filterPriority } }).then(r => setTasks(r.data));
+    // Status & priority are applied client-side (multi-select) — only pass server-side filters here
+    api.get(`/bugs/project/${projectId}`, { params: { search, assignee_id: filterAssignee } }).then(r => setBugs(r.data));
+    api.get(`/tasks/project/${projectId}`, { params: { search } }).then(r => setTasks(r.data));
     api.get('/users').then(r => setAllUsers(r.data));
   };
 
-  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search, filterStatus, filterPriority, filterAssignee]);
+  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [projectId, search, filterAssignee]);
+
+  // Apply multi-select filters client-side
+  const filteredBugs = useMemo(() => bugs.filter(b => {
+    if (filterStatuses.size && !filterStatuses.has(b.status)) return false;
+    if (filterPriorities.size && !filterPriorities.has(b.priority)) return false;
+    return true;
+  }), [bugs, filterStatuses, filterPriorities]);
+
+  const filteredTasks = useMemo(() => tasks.filter(t => {
+    if (filterStatuses.size && !filterStatuses.has(t.status)) return false;
+    if (filterPriorities.size && !filterPriorities.has(t.priority)) return false;
+    return true;
+  }), [tasks, filterStatuses, filterPriorities]);
+
+  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0;
 
   const createBug = async (e) => {
     e.preventDefault();
@@ -439,7 +518,7 @@ export default function ProjectDetail() {
         ].map(t => {
           const Icon = t.icon;
           return (
-            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatus(''); setFilterPriority(''); setFilterAssignee(''); }}
+            <button key={t.id} onClick={() => { setTab(t.id); setFilterStatuses(new Set()); setFilterPriorities(new Set()); setFilterAssignee(''); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.id ? 'bg-brand-gradient text-white shadow-card' : 'text-ink-600 hover:bg-ink-50'}`}>
               <Icon className="w-4 h-4" /> {t.label}
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab === t.id ? 'bg-white/20' : 'bg-ink-100'}`}>{t.count}</span>
@@ -455,14 +534,18 @@ export default function ProjectDetail() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400" />
             <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} className="input pl-10" />
           </div>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="input w-auto">
-            <option value="">All Statuses</option>
-            {(tab === 'bugs' ? BUG_STATUSES : TASK_STATUSES).map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)} className="input w-auto">
-            <option value="">All Priorities</option>
-            {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
+          <MultiSelectFilter
+            label="Statuses"
+            options={tab === 'bugs' ? BUG_STATUSES : TASK_STATUSES}
+            selected={filterStatuses}
+            onChange={setFilterStatuses}
+          />
+          <MultiSelectFilter
+            label="Priorities"
+            options={PRIORITIES}
+            selected={filterPriorities}
+            onChange={setFilterPriorities}
+          />
           {tab === 'bugs' && (
             <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} className="input w-auto">
               <option value="">All Assignees</option>
@@ -496,15 +579,35 @@ export default function ProjectDetail() {
       {/* Bug list */}
       {tab === 'bugs' && (
         <div className="card overflow-hidden">
-          {bugs.length === 0 ? (
+          {/* Result count bar */}
+          {bugs.length > 0 && (
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-ink-100 bg-ink-50/40">
+              <div className="text-sm text-ink-700">
+                {filtersActive ? (
+                  <>Showing <span className="font-semibold text-ink-900">{filteredBugs.length}</span> of <span className="font-semibold text-ink-900">{bugs.length}</span> bugs</>
+                ) : (
+                  <><span className="font-semibold text-ink-900">{bugs.length}</span> {bugs.length === 1 ? 'bug' : 'bugs'} total</>
+                )}
+              </div>
+              {filtersActive && (
+                <button
+                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); }}
+                  className="text-xs text-brand-700 hover:underline font-medium flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear filters
+                </button>
+              )}
+            </div>
+          )}
+          {filteredBugs.length === 0 ? (
             <div className="py-16 text-center">
               <div className="inline-flex w-14 h-14 items-center justify-center rounded-2xl bg-brand-50 mb-3"><Bug className="w-7 h-7 text-brand-600" /></div>
-              <p className="text-ink-700 font-medium">No bugs found</p>
-              <p className="text-ink-500 text-sm">Report the first bug to get started.</p>
+              <p className="text-ink-700 font-medium">{bugs.length === 0 ? 'No bugs found' : 'No bugs match your filters'}</p>
+              <p className="text-ink-500 text-sm">{bugs.length === 0 ? 'Report the first bug to get started.' : 'Try clearing some filters above.'}</p>
             </div>
           ) : (
             <div className="divide-y divide-ink-100">
-              {bugs.map(b => (
+              {filteredBugs.map(b => (
                 <div key={b.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-ink-50/50 transition-colors">
                   <span className="text-[11px] font-mono font-semibold text-brand-600 bg-brand-50 px-2 py-1 rounded-md border border-brand-100">#{b.bug_number}</span>
                   <Link to={`/bugs/${b.id}`} className="flex-1 min-w-0">
@@ -532,7 +635,7 @@ export default function ProjectDetail() {
       {tab === 'tasks' && taskView === 'board' && (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {KANBAN_COLUMNS.map(col => {
-            const colTasks = tasks.filter(t => t.status === col || (col === 'Completed' && t.status === 'Done'));
+            const colTasks = filteredTasks.filter(t => t.status === col || (col === 'Completed' && t.status === 'Done'));
             return (
               <div key={col} className="flex-shrink-0 w-80" onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, col)}>
                 <div className="card p-3 h-full min-h-[400px] bg-ink-50/40">
@@ -568,11 +671,30 @@ export default function ProjectDetail() {
 
       {tab === 'tasks' && taskView === 'list' && (
         <div className="card overflow-hidden">
-          {tasks.length === 0 ? (
-            <div className="py-16 text-center text-ink-400"><CheckSquare className="w-10 h-10 mx-auto mb-2" /><p>No tasks found</p></div>
+          {tasks.length > 0 && (
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-ink-100 bg-ink-50/40">
+              <div className="text-sm text-ink-700">
+                {filtersActive ? (
+                  <>Showing <span className="font-semibold text-ink-900">{filteredTasks.length}</span> of <span className="font-semibold text-ink-900">{tasks.length}</span> tasks</>
+                ) : (
+                  <><span className="font-semibold text-ink-900">{tasks.length}</span> {tasks.length === 1 ? 'task' : 'tasks'} total</>
+                )}
+              </div>
+              {filtersActive && (
+                <button
+                  onClick={() => { setFilterStatuses(new Set()); setFilterPriorities(new Set()); }}
+                  className="text-xs text-brand-700 hover:underline font-medium flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear filters
+                </button>
+              )}
+            </div>
+          )}
+          {filteredTasks.length === 0 ? (
+            <div className="py-16 text-center text-ink-400"><CheckSquare className="w-10 h-10 mx-auto mb-2" /><p>{tasks.length === 0 ? 'No tasks found' : 'No tasks match your filters'}</p></div>
           ) : (
             <div className="divide-y divide-ink-100">
-              {tasks.map(t => (
+              {filteredTasks.map(t => (
                 <Link key={t.id} to={`/tasks/${t.id}`} className="flex items-center gap-4 px-5 py-3.5 hover:bg-ink-50/50 transition-colors">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-ink-900 truncate">{t.title}</p>
