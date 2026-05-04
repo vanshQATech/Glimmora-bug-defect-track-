@@ -127,6 +127,10 @@ export default function TestCaseProject() {
     case_type: 'Positive',
     assignee_id: '',
   });
+  const [aiAssistPrompt, setAiAssistPrompt] = useState('');
+  const [aiAssistLoading, setAiAssistLoading] = useState(false);
+  const [aiAssistError, setAiAssistError] = useState('');
+  const [aiAssistFilled, setAiAssistFilled] = useState(false);
 
   const fetchAll = async () => {
     try {
@@ -217,7 +221,35 @@ export default function TestCaseProject() {
       assignee_id: '',
     });
     setCaseFiles([]);
+    setAiAssistPrompt('');
+    setAiAssistError('');
+    setAiAssistFilled(false);
     setShowCaseModal(true);
+  };
+
+  const fillWithAI = async () => {
+    if (!aiAssistPrompt.trim()) return;
+    setAiAssistLoading(true);
+    setAiAssistError('');
+    try {
+      const { data } = await api.post('/ai/fill-test-case', { prompt: aiAssistPrompt });
+      setCaseForm(f => ({
+        ...f,
+        title: data.title || f.title,
+        description: data.description || f.description,
+        preconditions: data.preconditions || f.preconditions,
+        steps: data.steps || f.steps,
+        expected_result: data.expected_result || f.expected_result,
+        priority: data.priority || f.priority,
+        severity: data.severity || f.severity,
+        case_type: data.case_type || f.case_type,
+      }));
+      setAiAssistFilled(true);
+    } catch (err) {
+      setAiAssistError(err.response?.data?.error || 'AI failed. Please try again.');
+    } finally {
+      setAiAssistLoading(false);
+    }
   };
 
   const submitCase = async (e) => {
@@ -774,9 +806,52 @@ export default function TestCaseProject() {
             <div className="flex items-start justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-ink-900">New Test Case</h2>
-                <p className="text-sm text-ink-500">Define steps, expected result, and priority</p>
+                <p className="text-sm text-ink-500">Fill manually or let AI generate all details</p>
               </div>
               <button type="button" onClick={() => setShowCaseModal(false)} className="text-ink-400 hover:text-ink-900"><X className="w-5 h-5" /></button>
+            </div>
+
+            {/* AI Assist chat section */}
+            <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-brand-gradient flex items-center justify-center shrink-0">
+                  <Sparkles className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">AI Assistant</p>
+                  <p className="text-xs text-ink-500">Describe the test case — AI will fill all fields</p>
+                </div>
+                {aiAssistFilled && (
+                  <span className="ml-auto text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-medium">✓ Fields filled</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={aiAssistPrompt}
+                  onChange={e => { setAiAssistPrompt(e.target.value); setAiAssistFilled(false); }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fillWithAI(); } }}
+                  placeholder='e.g. "Login page — valid credentials test case" or "Negative test for empty password field"'
+                  className="flex-1 px-3 py-2 border border-brand-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-300 bg-white"
+                  disabled={aiAssistLoading}
+                />
+                <button
+                  type="button"
+                  onClick={fillWithAI}
+                  disabled={aiAssistLoading || !aiAssistPrompt.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-brand-gradient text-white rounded-lg text-sm font-medium disabled:opacity-50 shrink-0"
+                >
+                  {aiAssistLoading
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
+                    : <><Sparkles className="w-3.5 h-3.5" /> Fill with AI</>}
+                </button>
+              </div>
+              {aiAssistError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">{aiAssistError}</p>
+              )}
+              {aiAssistFilled && (
+                <p className="text-xs text-brand-700">Fields have been filled below — review and edit before saving.</p>
+              )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">

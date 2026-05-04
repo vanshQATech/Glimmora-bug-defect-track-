@@ -652,4 +652,63 @@ router.post('/generate-test-cases', authenticate, async (req, res) => {
   }
 });
 
+// ---------- fill single test case form ----------
+const FILL_TC_SYSTEM = `You are a QA engineer. The user will describe a single test case scenario. Return ONLY valid JSON — no markdown, no explanation — with this exact shape:
+{
+  "title": "Concise test case title (max 80 chars)",
+  "description": "1-2 sentence description of what this test verifies",
+  "preconditions": "Bullet-point or sentence list of what must be true before running (empty string if none)",
+  "steps": "1. First step\\n2. Second step\\n3. ...  (numbered, clear actions)",
+  "expected_result": "Specific, verifiable expected outcome",
+  "priority": "Critical|High|Medium|Low",
+  "severity": "Critical|Major|Minor|Trivial",
+  "case_type": "Positive|Negative|Edge"
+}
+Be thorough — steps should be detailed enough for a tester to follow without guessing.`;
+
+router.post('/fill-test-case', authenticate, async (req, res) => {
+  const anthropic = getClient();
+  if (!anthropic) return res.status(503).json({ error: 'AI not configured. Add ANTHROPIC_API_KEY to server .env.' });
+
+  const { prompt } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
+  if (prompt.length > 2000) return res.status(400).json({ error: 'prompt too long (max 2000 chars)' });
+
+  try {
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1200,
+      system: FILL_TC_SYSTEM,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    let tc;
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      tc = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    } catch (_) {
+      return res.status(500).json({ error: 'AI returned unexpected format. Please try again.' });
+    }
+
+    const VALID_PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+    const VALID_SEVERITIES = ['Critical', 'Major', 'Minor', 'Trivial'];
+    const VALID_TYPES = ['Positive', 'Negative', 'Edge'];
+
+    res.json({
+      title: String(tc.title || '').trim().slice(0, 200),
+      description: String(tc.description || '').trim(),
+      preconditions: String(tc.preconditions || '').trim(),
+      steps: String(tc.steps || '').trim(),
+      expected_result: String(tc.expected_result || '').trim(),
+      priority: VALID_PRIORITIES.includes(tc.priority) ? tc.priority : 'Medium',
+      severity: VALID_SEVERITIES.includes(tc.severity) ? tc.severity : 'Major',
+      case_type: VALID_TYPES.includes(tc.case_type) ? tc.case_type : 'Positive',
+    });
+  } catch (err) {
+    console.error('[AI fill-test-case] error:', err?.message || err);
+    res.status(err?.status || 500).json({ error: err?.message || 'AI request failed' });
+  }
+});
+
 module.exports = router;
