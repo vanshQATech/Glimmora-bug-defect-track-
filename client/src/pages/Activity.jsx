@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import api, { API_BASE } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { Activity as ActivityIcon, Users, ClipboardList, AlertTriangle, CheckCircle2, Clock, Filter, Plus, Trash2, Download, BarChart3, PieChart as PieIcon, LineChart as LineIcon, FileText, X } from 'lucide-react';
+import { Activity as ActivityIcon, Users, ClipboardList, AlertTriangle, CheckCircle2, Clock, Filter, Plus, Trash2, Download, BarChart3, PieChart as PieIcon, LineChart as LineIcon, FileText, X, FileDown } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const STATUSES = ['Completed', 'In Progress', 'Blocked'];
 const LEAD_ROLES = ['Admin', 'Project Manager', 'Team Lead'];
@@ -485,6 +487,70 @@ export default function ActivityPage() {
     }
   };
 
+  const downloadPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+    const dateRange = filters.from || filters.to
+      ? `${filters.from || '…'} → ${filters.to || '…'}`
+      : 'All dates';
+    const filterNote = [
+      dateRange,
+      filters.user_id ? `Employee: ${users.find(u => u.id === filters.user_id)?.first_name || ''}` : '',
+      filters.project_id ? `Project: ${projects.find(p => p.id === filters.project_id)?.name || ''}` : '',
+      filters.status ? `Status: ${filters.status}` : '',
+    ].filter(Boolean).join('   |   ');
+
+    doc.setFontSize(16);
+    doc.setTextColor(40, 40, 40);
+    doc.text('Team Activity Report', 40, 40);
+
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Generated: ${new Date().toLocaleString()}   |   ${filterNote}`, 40, 58);
+
+    autoTable(doc, {
+      startY: 72,
+      head: [['Date', 'Employee', 'Project', 'Title', 'Status', 'Progress', 'Completed', 'In Progress', 'Planned', 'Blockers']],
+      body: teamUpdates.map(u => [
+        u.update_date,
+        u.employee_name,
+        u.project_name || '—',
+        u.title || '—',
+        u.status,
+        `${u.progress_percent || 0}%`,
+        u.tasks_completed || '—',
+        u.tasks_in_progress || '—',
+        u.tasks_planned || '—',
+        u.blockers || '—',
+      ]),
+      styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
+      headStyles: { fillColor: [124, 58, 237], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 246, 255] },
+      columnStyles: {
+        0: { cellWidth: 55 },
+        1: { cellWidth: 70 },
+        2: { cellWidth: 80 },
+        3: { cellWidth: 80 },
+        4: { cellWidth: 55 },
+        5: { cellWidth: 40 },
+        6: { cellWidth: 80 },
+        7: { cellWidth: 80 },
+        8: { cellWidth: 80 },
+        9: { cellWidth: 80 },
+      },
+    });
+
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(160, 160, 160);
+      doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.getWidth() - 80, doc.internal.pageSize.getHeight() - 16);
+    }
+
+    doc.save(`team-updates-${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   useEffect(() => {
     const jobs = [loadProjects(), loadMine()];
     if (isLead) jobs.push(loadUsers(), loadSummary(), loadTeam(), loadCharts());
@@ -648,10 +714,16 @@ export default function ActivityPage() {
                 <span className="text-sm font-semibold text-ink-700">Team updates</span>
                 <span className="text-xs text-ink-400">{teamUpdates.length} entries</span>
               </div>
-              <button onClick={downloadCsv}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-ink-100 text-ink-700 hover:bg-ink-50">
-                <Download className="w-3.5 h-3.5" /> Export CSV
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={downloadCsv}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-ink-100 text-ink-700 hover:bg-ink-50">
+                  <Download className="w-3.5 h-3.5" /> Export CSV
+                </button>
+                <button onClick={downloadPdf}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-200 text-red-700 hover:bg-red-50">
+                  <FileDown className="w-3.5 h-3.5" /> Export PDF
+                </button>
+              </div>
             </div>
             {teamUpdates.length === 0 ? (
               <div className="p-8 text-center text-sm text-ink-400">No updates match your filters.</div>
