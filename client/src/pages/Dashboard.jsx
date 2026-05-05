@@ -20,6 +20,8 @@ const STATUS_PALETTE = {
   'Checked by QA':              { grad: 'from-emerald-300 to-emerald-500', solid: '#10b981', text: 'text-emerald-700', bg: 'bg-emerald-500' },
   'Checked by Project Manager': { grad: 'from-green-300 to-green-500',     solid: '#22c55e', text: 'text-green-700',   bg: 'bg-green-500' },
   'Approved by PM':             { grad: 'from-brand-400 to-brand-600',     solid: '#8b5e3c', text: 'text-brand-700',   bg: 'bg-brand-600' },
+  'Not a Bug':                  { grad: 'from-stone-300 to-stone-500',     solid: '#78716c', text: 'text-stone-700',   bg: 'bg-stone-500' },
+  'Need Clarification':         { grad: 'from-orange-300 to-orange-500',   solid: '#f97316', text: 'text-orange-700',  bg: 'bg-orange-500' },
 };
 
 function getGreeting() {
@@ -134,7 +136,7 @@ function StatusBars({ counts }) {
             {BUG_STATUSES.map(s => {
               const val = counts[s] || 0;
               const pct = niceMax > 0 ? (val / niceMax) * 100 : 0;
-              const { grad } = STATUS_PALETTE[s];
+              const { grad } = STATUS_PALETTE[s] || { grad: 'from-ink-300 to-ink-500' };
               return (
                 <div key={s} className="group relative flex-1 h-full flex flex-col items-center justify-end">
                   <div className="absolute -top-1 left-1/2 -translate-x-1/2 -translate-y-full opacity-0 group-hover:opacity-100 transition-opacity bg-ink-900 text-white text-[10px] font-medium px-2 py-1 rounded-md whitespace-nowrap z-10 pointer-events-none shadow-pop">

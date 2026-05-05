@@ -92,6 +92,8 @@ const STATUS_PALETTE = {
   'Checked by QA':              { grad: 'from-emerald-300 to-emerald-500', dot: 'bg-emerald-500', text: 'text-emerald-700' },
   'Checked by Project Manager': { grad: 'from-green-300 to-green-500',     dot: 'bg-green-500',   text: 'text-green-700' },
   'Approved by PM':             { grad: 'from-brand-300 to-brand-600',     dot: 'bg-brand-600',   text: 'text-brand-700' },
+  'Not a Bug':                  { grad: 'from-stone-300 to-stone-500',     dot: 'bg-stone-500',   text: 'text-stone-700' },
+  'Need Clarification':         { grad: 'from-orange-300 to-orange-500',   dot: 'bg-orange-500',  text: 'text-orange-700' },
 };
 
 function BugStatusChart({ bugs }) {
