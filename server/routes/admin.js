@@ -60,4 +60,25 @@ router.get('/tables/:name', authenticate, authorize('Admin'), (req, res) => {
   }
 });
 
+// Send a test email to verify Brevo config
+router.post('/test-email', authenticate, authorize('Admin'), async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ error: 'to email is required' });
+  try {
+    const { sendNotificationEmail } = require('../utils/mailer');
+    const ok = await sendNotificationEmail({
+      to,
+      subject: 'Test Email — Glimmora DefectDesk',
+      message: 'This is a test email from Glimmora DefectDesk to verify your email configuration is working correctly.',
+      entityType: null,
+      entityId: null,
+      baseUrl: process.env.APP_URL || 'https://defectx.glimmora.ai',
+    });
+    if (ok) res.json({ success: true, message: `Test email sent to ${to}` });
+    else res.status(500).json({ error: 'Email sending failed — check server logs for details' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
