@@ -65,17 +65,39 @@ router.get('/test-email', authenticate, authorize('Admin'), async (req, res) => 
   const { to } = req.query;
   if (!to) return res.status(400).json({ error: 'to email is required' });
   try {
-    const { sendNotificationEmail } = require('../utils/mailer');
-    const ok = await sendNotificationEmail({
-      to,
-      subject: 'Test Email — Glimmora DefectDesk',
-      message: 'This is a test email from Glimmora DefectDesk to verify your email configuration is working correctly.',
-      entityType: null,
-      entityId: null,
-      baseUrl: process.env.APP_URL || 'https://defectx.glimmora.ai',
+    const https = require('https');
+    const apiKey = (process.env.BREVO_API_KEY || process.env.SMTP_PASS || '').trim();
+    const smtpFrom = process.env.SMTP_FROM || '';
+    const fromMatch = smtpFrom.match(/^"?([^"<]+)"?\s*<([^>]+)>$/);
+    const sender = fromMatch
+      ? { name: fromMatch[1].trim(), email: fromMatch[2].trim() }
+      : { name: 'Glimmora DefectDesk', email: smtpFrom.trim() };
+
+    if (!apiKey) return res.status(500).json({ error: 'BREVO_API_KEY / SMTP_PASS not set' });
+    if (!sender.email) return res.status(500).json({ error: 'SMTP_FROM not set or invalid format' });
+
+    const body = JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject: '[Glimmora DefectDesk] Test Email',
+      htmlContent: '<p>This is a test email to verify your Brevo configuration is working.</p>',
     });
-    if (ok) res.json({ success: true, message: `Test email sent to ${to}` });
-    else res.status(500).json({ error: 'Email sending failed — check server logs for details' });
+
+    await new Promise((resolve, reject) => {
+      const r = https.request({
+        hostname: 'api.brevo.com', path: '/v3/smtp/email', method: 'POST',
+        headers: { 'api-key': apiKey, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, resp => {
+        let data = '';
+        resp.on('data', c => data += c);
+        resp.on('end', () => resp.statusCode >= 200 && resp.statusCode < 300 ? resolve(data) : reject(new Error(`Brevo ${resp.statusCode}: ${data}`)));
+      });
+      r.setTimeout(15000, () => r.destroy(new Error('Brevo timeout')));
+      r.on('error', reject);
+      r.write(body); r.end();
+    });
+
+    res.json({ success: true, message: `Test email sent to ${to}`, sender: sender.email });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
