@@ -666,23 +666,64 @@ const FILL_TC_SYSTEM = `You are a QA engineer. The user will describe a single t
 }
 Be thorough — steps should be detailed enough for a tester to follow without guessing.`;
 
-router.post('/fill-test-case', authenticate, async (req, res) => {
-  const anthropic = getClient();
-  if (!anthropic) return res.status(503).json({ error: 'AI is not configured on the server (ANTHROPIC_API_KEY missing).' });
+async function generateWithGemini(systemPrompt, userPrompt) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+  const https = require('https');
+  const body = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1200, responseMimeType: 'application/json' },
+  });
+  return new Promise((resolve, reject) => {
+    const r = https.request({
+      hostname: 'generativelanguage.googleapis.com',
+      path: `/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, resp => {
+      let data = '';
+      resp.on('data', c => data += c);
+      resp.on('end', () => {
+        if (resp.statusCode < 200 || resp.statusCode >= 300) return reject(new Error(`Gemini ${resp.statusCode}: ${data}`));
+        try {
+          const json = JSON.parse(data);
+          const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          resolve(text);
+        } catch (e) { reject(e); }
+      });
+    });
+    r.setTimeout(30000, () => r.destroy(new Error('Gemini timeout')));
+    r.on('error', reject);
+    r.write(body); r.end();
+  });
+}
 
+router.post('/fill-test-case', authenticate, async (req, res) => {
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
   if (prompt.length > 2000) return res.status(400).json({ error: 'prompt too long (max 2000 chars)' });
 
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1200,
-      system: FILL_TC_SYSTEM,
-      messages: [{ role: 'user', content: prompt }],
-    });
+  const hasGemini = !!(process.env.GEMINI_API_KEY || '').trim();
+  const anthropic = getClient();
+  if (!hasGemini && !anthropic) {
+    return res.status(503).json({ error: 'AI not configured on the server. Set GEMINI_API_KEY (free) or ANTHROPIC_API_KEY.' });
+  }
 
-    const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  try {
+    let text = '';
+    if (hasGemini) {
+      text = await generateWithGemini(FILL_TC_SYSTEM, prompt);
+    } else {
+      const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1200,
+        system: FILL_TC_SYSTEM,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    }
+
     let tc;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -707,8 +748,7 @@ router.post('/fill-test-case', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('[AI fill-test-case] error:', err?.message || err);
-    const status = err?.status || err?.response?.status || 500;
-    res.status(status).json({ error: err?.message || 'AI request failed. Please try again.' });
+    res.status(500).json({ error: err?.message || 'AI request failed. Please try again.' });
   }
 });
 
