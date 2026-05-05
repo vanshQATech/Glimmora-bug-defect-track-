@@ -61,8 +61,8 @@ router.get('/tables/:name', authenticate, authorize('Admin'), (req, res) => {
 });
 
 // Send a test email to verify Brevo config
-router.post('/test-email', authenticate, authorize('Admin'), async (req, res) => {
-  const { to } = req.body;
+router.get('/test-email', authenticate, authorize('Admin'), async (req, res) => {
+  const { to } = req.query;
   if (!to) return res.status(400).json({ error: 'to email is required' });
   try {
     const { sendNotificationEmail } = require('../utils/mailer');
