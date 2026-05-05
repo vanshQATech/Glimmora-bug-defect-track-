@@ -293,6 +293,23 @@ router.put('/:id', authenticate, (req, res) => {
   }
 });
 
+// Manually notify assignee via email
+router.post('/:id/notify-assignee', authenticate, (req, res) => {
+  try {
+    const db = getDb();
+    const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
+    if (!bug) return res.status(404).json({ error: 'Bug not found' });
+    if (!bug.assignee_id) return res.status(400).json({ error: 'No assignee set for this bug' });
+    const sender = `${req.user.first_name} ${req.user.last_name}`;
+    notifyUser(db, bug.assignee_id, 'bug_reminder', `Reminder: Bug #${bug.bug_number} — "${bug.summary}"`,
+      `${sender} sent you a reminder about bug #${bug.bug_number} — "<strong>${bug.summary}</strong>". Please review and update its status.`,
+      'bug', bug.id, reqBaseUrl(req));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload attachment to existing bug
 router.post('/:id/attachments', authenticate, upload.array('attachments', 10), (req, res) => {
   try {

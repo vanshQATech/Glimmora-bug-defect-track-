@@ -359,6 +359,19 @@ export default function ProjectDetail() {
       console.error('updateBugAssignee error:', err);
     }
   };
+
+  const [notifyingBug, setNotifyingBug] = useState(null);
+  const notifyAssignee = async (bugId, e) => {
+    e.stopPropagation();
+    setNotifyingBug(bugId);
+    try {
+      await api.post(`/bugs/${bugId}/notify-assignee`);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to send email');
+    } finally {
+      setTimeout(() => setNotifyingBug(null), 1500);
+    }
+  };
   const updateTaskStatus = async (taskId, status) => {
     try { await api.put(`/tasks/${taskId}`, { status }); fetchAll(); }
     catch (err) { alert(err.response?.data?.error || 'Failed'); }
@@ -642,6 +655,15 @@ export default function ProjectDetail() {
                     <option value="">Unassigned</option>
                     {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
                   </select>
+                  {b.assignee_id && (
+                    <button
+                      onClick={e => notifyAssignee(b.id, e)}
+                      title="Send email reminder to assignee"
+                      className={`p-1.5 rounded-lg border transition-all ${notifyingBug === b.id ? 'bg-green-50 border-green-300 text-green-600' : 'border-ink-200 text-ink-400 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-600'}`}
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
