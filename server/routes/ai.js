@@ -666,9 +666,7 @@ const FILL_TC_SYSTEM = `You are a QA engineer. The user will describe a single t
 }
 Be thorough — steps should be detailed enough for a tester to follow without guessing.`;
 
-async function generateWithGemini(systemPrompt, userPrompt) {
-  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+function callGeminiModel(apiKey, model, systemPrompt, userPrompt) {
   const https = require('https');
   const body = JSON.stringify({
     contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
@@ -678,14 +676,18 @@ async function generateWithGemini(systemPrompt, userPrompt) {
   return new Promise((resolve, reject) => {
     const r = https.request({
       hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      path: `/v1beta/models/${model}:generateContent?key=${apiKey}`,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
     }, resp => {
       let data = '';
       resp.on('data', c => data += c);
       resp.on('end', () => {
-        if (resp.statusCode < 200 || resp.statusCode >= 300) return reject(new Error(`Gemini ${resp.statusCode}: ${data}`));
+        if (resp.statusCode < 200 || resp.statusCode >= 300) {
+          const e = new Error(`Gemini ${resp.statusCode}: ${data}`);
+          e.statusCode = resp.statusCode;
+          return reject(e);
+        }
         try {
           const json = JSON.parse(data);
           const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -697,6 +699,24 @@ async function generateWithGemini(systemPrompt, userPrompt) {
     r.on('error', reject);
     r.write(body); r.end();
   });
+}
+
+async function generateWithGemini(systemPrompt, userPrompt) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+  // Try models in order — fall through on 404/429 (model unavailable or out of quota)
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      return await callGeminiModel(apiKey, model, systemPrompt, userPrompt);
+    } catch (err) {
+      lastErr = err;
+      if (err.statusCode === 404 || err.statusCode === 429) continue;
+      throw err;
+    }
+  }
+  throw lastErr || new Error('All Gemini models failed');
 }
 
 router.post('/fill-test-case', authenticate, async (req, res) => {
