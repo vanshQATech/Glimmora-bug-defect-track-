@@ -41,6 +41,7 @@ export default function BugDetail() {
         severity: res.data.severity,
         assignee_id: res.data.assignee_id || '',
         qa_owner_id: res.data.qa_owner_id || '',
+        due_date: res.data.due_date || '',
       });
       api.get(`/projects/${res.data.project_id}`).then(r => setMembers(r.data.members || []));
     }).catch(() => navigate('/'));
@@ -260,7 +261,15 @@ export default function BugDetail() {
             {metaRow('Environment', bug.environment)}
             {metaRow('Browser', bug.browser)}
             {metaRow('Device', bug.device)}
-            {metaRow('Due Date', bug.due_date)}
+            <div className="py-2">
+                <label className="label">Due Date</label>
+                <input
+                  type="date"
+                  value={editForm.due_date || ''}
+                  onChange={e => { setEditForm({ ...editForm, due_date: e.target.value }); updateBug({ due_date: e.target.value || null }); }}
+                  className="input"
+                />
+              </div>
             {bug.url && (
               <div className="py-2">
                 <span className="text-xs text-ink-500">URL</span>

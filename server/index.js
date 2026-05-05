@@ -74,12 +74,50 @@ if (fs.existsSync(clientIndex)) {
   });
 }
 
+// Send due-date reminder emails for bugs due today
+async function sendDueDateReminders() {
+  try {
+    const db = getDb();
+    const today = new Date().toISOString().split('T')[0];
+    const dueBugs = db.prepare(`
+      SELECT b.id, b.bug_number, b.summary, b.status,
+        u.email as assignee_email, u.first_name as assignee_first
+      FROM bugs b
+      JOIN users u ON b.assignee_id = u.id
+      WHERE b.due_date = ? AND b.status NOT IN ('Approved by PM', 'Not a Bug')
+    `).all(today);
+
+    if (dueBugs.length === 0) return;
+
+    const { sendNotificationEmail } = require('./utils/mailer');
+    const appUrl = process.env.APP_URL || 'https://defectx.glimmora.ai';
+
+    for (const bug of dueBugs) {
+      await sendNotificationEmail({
+        to: bug.assignee_email,
+        subject: `Due Today: Bug #${bug.bug_number} — "${bug.summary}"`,
+        message: `Hi ${bug.assignee_first}, bug #${bug.bug_number} — "<strong>${bug.summary}</strong>" is due today and is currently <strong>${bug.status}</strong>. Please update its status or resolve it.`,
+        entityType: 'bug',
+        entityId: bug.id,
+        baseUrl: appUrl,
+      });
+      console.log(`[DueDate] Reminder sent to ${bug.assignee_email} for bug #${bug.bug_number}`);
+    }
+  } catch (err) {
+    console.error('[DueDate] Reminder check failed:', err.message);
+  }
+}
+
 // Initialize database then start server
 async function start() {
   await initializeDatabase();
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  // Send due-date reminders on startup, then every 24 hours
+  sendDueDateReminders();
+  setInterval(sendDueDateReminders, 24 * 60 * 60 * 1000);
 }
 
 start().catch(err => {

@@ -9,6 +9,8 @@ export const BUG_STATUSES = [
   'Checked by QA',
   'Checked by Project Manager',
   'Approved by PM',
+  'Not a Bug',
+  'Need Clarification',
 ];
 
 export const TASK_STATUSES = ['To Do', 'In Progress', 'In Review', 'Blocked', 'Completed', 'Done'];

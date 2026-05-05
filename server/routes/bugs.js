@@ -191,7 +191,7 @@ router.get('/:id', authenticate, (req, res) => {
 // Create bug
 router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
   try {
-    const { project_id, summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, priority, severity } = req.body;
+    const { project_id, summary, description, steps_to_reproduce, expected_result, actual_result, url, assignee_id, priority, severity, due_date } = req.body;
 
     if (!project_id || !summary) {
       return res.status(400).json({ error: 'Project and summary are required' });
@@ -205,9 +205,9 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
     const bugNumber = (maxNum?.max_num || 0) + 1;
 
     db.prepare(`
-      INSERT INTO bugs (id, bug_number, project_id, summary, description, steps_to_reproduce, expected_result, actual_result, url, reporter_id, assignee_id, priority, severity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(bugId, bugNumber, project_id, summary, description || '', steps_to_reproduce || '', expected_result || '', actual_result || '', url || '', req.user.id, assignee_id || null, priority || 'Medium', severity || 'Major');
+      INSERT INTO bugs (id, bug_number, project_id, summary, description, steps_to_reproduce, expected_result, actual_result, url, reporter_id, assignee_id, priority, severity, due_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(bugId, bugNumber, project_id, summary, description || '', steps_to_reproduce || '', expected_result || '', actual_result || '', url || '', req.user.id, assignee_id || null, priority || 'Medium', severity || 'Major', due_date || null);
 
     // Save attachments (bytes stored in DB so they survive deploys)
     if (req.files && req.files.length > 0) {
@@ -223,7 +223,10 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
 
     // Notify assignee
     if (assignee_id && assignee_id !== req.user.id) {
-      notifyUser(db, assignee_id, 'bug_assigned', 'Bug Assigned', `Bug "${summary}" has been assigned to you`, 'bug', bugId, reqBaseUrl(req));
+      const assigner = `${req.user.first_name} ${req.user.last_name}`;
+      notifyUser(db, assignee_id, 'bug_assigned', `Bug #${bugNumber} Assigned to You`,
+        `${assigner} has assigned bug #${bugNumber} — "${summary}" to you. Click "View Bug" to see the full details, steps to reproduce, and priority.`,
+        'bug', bugId, reqBaseUrl(req));
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(bugId);
@@ -270,7 +273,10 @@ router.put('/:id', authenticate, (req, res) => {
     // Notify on assignment change
     const newAssignee = req.body.assignee_id;
     if (newAssignee && newAssignee !== existing.assignee_id && newAssignee !== req.user.id) {
-      notifyUser(db, newAssignee, 'bug_assigned', 'Bug Assigned', `Bug "${existing.summary}" has been assigned to you`, 'bug', req.params.id, reqBaseUrl(req));
+      const assigner = `${req.user.first_name} ${req.user.last_name}`;
+      notifyUser(db, newAssignee, 'bug_assigned', `Bug #${existing.bug_number} Assigned to You`,
+        `${assigner} has assigned bug #${existing.bug_number} — "${existing.summary}" to you. Click "View Bug" to open it and see the full details.`,
+        'bug', req.params.id, reqBaseUrl(req));
     }
 
     // Notify on status change
