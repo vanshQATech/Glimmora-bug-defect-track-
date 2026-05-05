@@ -367,7 +367,8 @@ export default function ProjectDetail() {
     try {
       await api.post(`/bugs/${bugId}/notify-assignee`);
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to send email');
+      const msg = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to send email';
+      alert(`Email error: ${msg} (status: ${err.response?.status ?? 'no response'})`);
     } finally {
       setTimeout(() => setNotifyingBug(null), 1500);
     }
