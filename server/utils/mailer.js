@@ -9,7 +9,7 @@ function parseFrom(fromStr) {
 
 function brevoSend(to, subject, html) {
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.BREVO_API_KEY || process.env.SMTP_PASS;
+    const apiKey = (process.env.BREVO_API_KEY || process.env.SMTP_PASS || '').trim();
     if (!apiKey) return reject(new Error('No Brevo API key configured (BREVO_API_KEY or SMTP_PASS)'));
 
     const sender = parseFrom(process.env.SMTP_FROM);
