@@ -221,13 +221,26 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
 
     addAuditLog(db, 'bug', bugId, 'created', null, null, null, req.user.id);
 
+    const reporterName = `${req.user.first_name} ${req.user.last_name}`;
+
     // Notify assignee
     if (assignee_id && assignee_id !== req.user.id) {
-      const assigner = `${req.user.first_name} ${req.user.last_name}`;
       notifyUser(db, assignee_id, 'bug_assigned', `Bug #${bugNumber} Assigned to You`,
-        `${assigner} has assigned bug #${bugNumber} — "${summary}" to you. Click "View Bug" to see the full details, steps to reproduce, and priority.`,
+        `${reporterName} has assigned bug #${bugNumber} — "${summary}" to you. Click "View Bug" to see the full details, steps to reproduce, and priority.`,
         'bug', bugId, reqBaseUrl(req));
     }
+
+    // Always notify Tamilarasi Nagarajan (frontend dev) of every new bug
+    try {
+      const tamil = db.prepare(
+        `SELECT id FROM users WHERE first_name = 'Tamilarasi' AND last_name = 'Nagarajan' AND is_active = 1 LIMIT 1`
+      ).get();
+      if (tamil && tamil.id !== req.user.id && tamil.id !== assignee_id) {
+        notifyUser(db, tamil.id, 'bug_raised', `New Bug #${bugNumber} Raised — "${summary}"`,
+          `${reporterName} raised bug #${bugNumber} — "${summary}". Click "View Bug" to see the full details, steps to reproduce, priority, and severity.`,
+          'bug', bugId, reqBaseUrl(req));
+      }
+    } catch (e) { console.error('Tamilarasi notify failed:', e.message); }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(bugId);
     res.status(201).json(bug);
@@ -281,8 +294,26 @@ router.put('/:id', authenticate, (req, res) => {
 
     // Notify on status change
     const newStatus = req.body.status;
-    if (newStatus && newStatus !== existing.status && existing.reporter_id !== req.user.id) {
-      notifyUser(db, existing.reporter_id, 'status_change', 'Bug Status Updated', `Bug "${existing.summary}" status changed to ${newStatus}`, 'bug', req.params.id, reqBaseUrl(req));
+    if (newStatus && newStatus !== existing.status) {
+      const actor = `${req.user.first_name} ${req.user.last_name}`;
+      const statusMsg = `${actor} changed bug #${existing.bug_number} — "${existing.summary}" status from ${existing.status} to ${newStatus}.`;
+
+      if (existing.reporter_id !== req.user.id) {
+        notifyUser(db, existing.reporter_id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
+      }
+
+      // Notify all active Project Managers
+      try {
+        const pms = db.prepare(
+          `SELECT id FROM users WHERE role = 'Project Manager' AND is_active = 1`
+        ).all();
+        const notified = new Set([req.user.id, existing.reporter_id]);
+        for (const pm of pms) {
+          if (notified.has(pm.id)) continue;
+          notifyUser(db, pm.id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
+          notified.add(pm.id);
+        }
+      } catch (e) { console.error('PM status-change notify failed:', e.message); }
     }
 
     const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
