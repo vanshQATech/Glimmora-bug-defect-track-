@@ -482,28 +482,142 @@ Only answer questions about Glimmora DefectDesk data and features. If the user a
 
 Always brand yourself as the **Glimmora DefectDesk Assistant**.`;
 
+// ---------- Gemini function-calling chat (free fallback) ----------
+// Convert an Anthropic-style tool to a Gemini functionDeclaration. Gemini's
+// parameters use OpenAPI 3.0 Schema, which is a subset of JSON Schema —
+// strip fields like `additionalProperties` that Gemini will reject.
+function sanitizeSchemaForGemini(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeSchemaForGemini);
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'additionalProperties' || k === '$schema') continue;
+    out[k] = sanitizeSchemaForGemini(v);
+  }
+  return out;
+}
+
+function toGeminiTool(t) {
+  return {
+    name: t.name,
+    description: t.description,
+    parameters: sanitizeSchemaForGemini(t.input_schema || { type: 'object', properties: {} }),
+  };
+}
+
+function postGeminiJSON(apiKey, model, body) {
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const r = https.request({
+      hostname: 'generativelanguage.googleapis.com',
+      path: `/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, resp => {
+      let data = '';
+      resp.on('data', c => data += c);
+      resp.on('end', () => {
+        if (resp.statusCode < 200 || resp.statusCode >= 300) {
+          const e = new Error(`Gemini ${resp.statusCode}: ${String(data).slice(0, 500)}`);
+          e.statusCode = resp.statusCode;
+          return reject(e);
+        }
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    r.setTimeout(45000, () => r.destroy(new Error('Gemini timeout')));
+    r.on('error', reject);
+    r.write(body); r.end();
+  });
+}
+
+async function callGeminiChat(apiKey, body) {
+  const RETRY_CODES = new Set([404, 429, 500, 502, 503, 504]);
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+  let lastErr = null;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await postGeminiJSON(apiKey, model, body);
+      } catch (err) {
+        lastErr = err;
+        if (!RETRY_CODES.has(err.statusCode)) throw err;
+        if (attempt === 0 && err.statusCode >= 500) {
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw lastErr || new Error('All Gemini models failed');
+}
+
+async function chatWithGemini({ systemPrompt, userHeader, history, message, user }) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+
+  const contents = [];
+  if (Array.isArray(history)) {
+    for (const m of history.slice(-10)) {
+      if (m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant')) {
+        contents.push({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        });
+      }
+    }
+  }
+  contents.push({ role: 'user', parts: [{ text: message }] });
+
+  const tools = [{ functionDeclarations: TOOLS.map(toGeminiTool) }];
+  const systemInstruction = { parts: [{ text: `${systemPrompt}\n\n${userHeader}` }] };
+  const generationConfig = { temperature: 0.5, maxOutputTokens: MAX_TOKENS };
+
+  for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
+    const body = JSON.stringify({
+      contents,
+      systemInstruction,
+      tools,
+      toolConfig: { functionCallingConfig: { mode: 'AUTO' } },
+      generationConfig,
+    });
+    const result = await callGeminiChat(apiKey, body);
+    const cand = result.candidates?.[0];
+    const parts = cand?.content?.parts || [];
+    const fnCalls = parts.filter(p => p.functionCall);
+
+    if (fnCalls.length === 0) {
+      const text = parts.filter(p => p.text).map(p => p.text).join('\n').trim();
+      return text;
+    }
+    if (iter === MAX_TOOL_ITERATIONS) break;
+
+    contents.push({ role: 'model', parts });
+    const responseParts = fnCalls.map(p => {
+      const { name, args } = p.functionCall;
+      const out = runTool(name, args || {}, user);
+      return { functionResponse: { name, response: out && typeof out === 'object' ? out : { result: out } } };
+    });
+    contents.push({ role: 'user', parts: responseParts });
+  }
+
+  return "I couldn't finalize an answer (the assistant kept asking for more data). Please rephrase the question.";
+}
+
 // ---------- chat endpoint ----------
 router.post('/chat', authenticate, async (req, res) => {
   const anthropic = getClient();
-  if (!anthropic) {
+  const hasGemini = !!(process.env.GEMINI_API_KEY || '').trim();
+  if (!anthropic && !hasGemini) {
     return res.status(503).json({
-      error: 'AI assistant is not configured. Add ANTHROPIC_API_KEY to server .env and restart.',
+      error: 'AI assistant is not configured. Add GEMINI_API_KEY (free) or ANTHROPIC_API_KEY (paid) to server .env and restart.',
     });
   }
 
   const { message, history } = req.body || {};
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'message is required' });
   if (message.length > 4000) return res.status(400).json({ error: 'message too long' });
-
-  const messages = [];
-  if (Array.isArray(history)) {
-    for (const m of history.slice(-10)) {
-      if (m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string') {
-        messages.push({ role: m.role, content: m.content });
-      }
-    }
-  }
-  messages.push({ role: 'user', content: message });
 
   const userHeader = `## Current user
 - Name: ${req.user.first_name} ${req.user.last_name}
@@ -512,34 +626,18 @@ router.post('/chat', authenticate, async (req, res) => {
 - Is lead (can query other employees): ${isLead(req.user) ? 'yes' : 'no'}`;
 
   try {
-    let response = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: [
-        { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: userHeader },
-      ],
-      tools: TOOLS,
-      messages,
-    });
+    if (anthropic) {
+      const messages = [];
+      if (Array.isArray(history)) {
+        for (const m of history.slice(-10)) {
+          if (m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string') {
+            messages.push({ role: m.role, content: m.content });
+          }
+        }
+      }
+      messages.push({ role: 'user', content: message });
 
-    let iterations = 0;
-    while (response.stop_reason === 'tool_use' && iterations < MAX_TOOL_ITERATIONS) {
-      iterations++;
-      const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-      const toolResultBlocks = toolUseBlocks.map(tu => {
-        const result = runTool(tu.name, tu.input, req.user);
-        return {
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content: JSON.stringify(result).slice(0, 12000),
-        };
-      });
-
-      messages.push({ role: 'assistant', content: response.content });
-      messages.push({ role: 'user', content: toolResultBlocks });
-
-      response = await anthropic.messages.create({
+      let response = await anthropic.messages.create({
         model: MODEL,
         max_tokens: MAX_TOKENS,
         system: [
@@ -549,21 +647,63 @@ router.post('/chat', authenticate, async (req, res) => {
         tools: TOOLS,
         messages,
       });
+
+      let iterations = 0;
+      while (response.stop_reason === 'tool_use' && iterations < MAX_TOOL_ITERATIONS) {
+        iterations++;
+        const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+        const toolResultBlocks = toolUseBlocks.map(tu => {
+          const result = runTool(tu.name, tu.input, req.user);
+          return {
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content: JSON.stringify(result).slice(0, 12000),
+          };
+        });
+
+        messages.push({ role: 'assistant', content: response.content });
+        messages.push({ role: 'user', content: toolResultBlocks });
+
+        response = await anthropic.messages.create({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: [
+            { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: userHeader },
+          ],
+          tools: TOOLS,
+          messages,
+        });
+      }
+
+      const text = response.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('\n')
+        .trim();
+
+      return res.json({
+        reply: text || "I couldn't generate a response. Please try again.",
+        usage: response.usage,
+        provider: 'anthropic',
+      });
     }
 
-    const text = response.content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('\n')
-      .trim();
-
-    res.json({
-      reply: text || "I couldn't generate a response. Please try again.",
-      usage: response.usage,
+    // Free Gemini fallback path
+    const reply = await chatWithGemini({
+      systemPrompt: SYSTEM_PROMPT,
+      userHeader,
+      history,
+      message,
+      user: req.user,
+    });
+    return res.json({
+      reply: reply || "I couldn't generate a response. Please try again.",
+      provider: 'gemini',
     });
   } catch (err) {
-    console.error('[AI] Claude API error:', err?.message || err);
-    const status = err?.status || 500;
+    console.error('[AI] chat error:', err?.message || err);
+    const status = err?.status || err?.statusCode || 500;
     res.status(status).json({ error: err?.message || 'AI request failed' });
   }
 });
