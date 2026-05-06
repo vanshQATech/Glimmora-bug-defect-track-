@@ -230,15 +230,21 @@ router.post('/', authenticate, upload.array('attachments', 10), (req, res) => {
         'bug', bugId, reqBaseUrl(req));
     }
 
-    // Always notify Tamilarasi Nagarajan (frontend dev) of every new bug
+    // Notify Tamilarasi Nagarajan (frontend dev) of every new bug —
+    // ONLY for projects she's actually a member of.
     try {
       const tamil = db.prepare(
         `SELECT id FROM users WHERE first_name = 'Tamilarasi' AND last_name = 'Nagarajan' AND is_active = 1 LIMIT 1`
       ).get();
       if (tamil && tamil.id !== req.user.id && tamil.id !== assignee_id) {
-        notifyUser(db, tamil.id, 'bug_raised', `New Bug #${bugNumber} Raised — "${summary}"`,
-          `${reporterName} raised bug #${bugNumber} — "${summary}". Click "View Bug" to see the full details, steps to reproduce, priority, and severity.`,
-          'bug', bugId, reqBaseUrl(req));
+        const isMember = db.prepare(
+          'SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?'
+        ).get(project_id, tamil.id);
+        if (isMember) {
+          notifyUser(db, tamil.id, 'bug_raised', `New Bug #${bugNumber} Raised — "${summary}"`,
+            `${reporterName} raised bug #${bugNumber} — "${summary}". Click "View Bug" to see the full details, steps to reproduce, priority, and severity.`,
+            'bug', bugId, reqBaseUrl(req));
+        }
       }
     } catch (e) { console.error('Tamilarasi notify failed:', e.message); }
 
