@@ -1,15 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Brand from '../components/Brand';
 import { ArrowRight } from 'lucide-react';
+import { renderGoogleButton, isGoogleConfigured } from '../utils/googleAuth';
 
 export default function Register() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { register, login } = useAuth();
+  const { register, login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const googleBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!isGoogleConfigured() || !googleBtnRef.current) return;
+    renderGoogleButton(googleBtnRef.current, {
+      onCredential: async (credential) => {
+        setError('');
+        setLoading(true);
+        try {
+          await loginWithGoogle(credential);
+          navigate('/');
+        } catch (err) {
+          setError(err.response?.data?.error || 'Google sign-in failed');
+        } finally {
+          setLoading(false);
+        }
+      },
+      onError: (err) => setError(err.message || 'Could not load Google Sign-In'),
+    });
+  }, [loginWithGoogle, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -80,6 +101,16 @@ export default function Register() {
           <button type="submit" disabled={loading} className="btn-primary w-full py-3 text-base">
             {loading ? 'Creating account…' : <>Create account <ArrowRight className="w-4 h-4" /></>}
           </button>
+
+          {isGoogleConfigured() && (
+            <>
+              <div className="relative my-2">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-ink-200" /></div>
+                <div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-ink-500">or</span></div>
+              </div>
+              <div ref={googleBtnRef} className="flex justify-center" />
+            </>
+          )}
 
           <p className="text-center text-sm text-ink-500">
             Already have an account? <Link to="/login" className="text-brand-700 font-semibold hover:underline">Sign in</Link>

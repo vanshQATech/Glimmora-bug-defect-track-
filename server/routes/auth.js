@@ -2,11 +2,25 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+const { OAuth2Client } = require('google-auth-library');
 const { getDb, flushSnapshotNow } = require('../database');
 const { authenticate } = require('../middleware/auth');
 const { sendPasswordResetEmail } = require('../utils/mailer');
 
 const router = express.Router();
+
+let googleClient = null;
+function getGoogleClient() {
+  if (!process.env.GOOGLE_CLIENT_ID) return null;
+  if (!googleClient) googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  return googleClient;
+}
+
+function getAllowedDomains() {
+  const raw = process.env.ALLOWED_GOOGLE_DOMAINS || 'glimmora.ai,glimmora.com';
+  return raw.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+}
 
 // Register
 router.post('/register', async (req, res) => {
@@ -94,6 +108,82 @@ router.post('/login', (req, res) => {
       },
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Google Sign-In — verify ID token, auto-create user if domain allowed
+router.post('/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ error: 'Missing Google credential' });
+
+    const client = getGoogleClient();
+    if (!client) return res.status(500).json({ error: 'Google Sign-In not configured on server' });
+
+    let payload;
+    try {
+      const ticket = await client.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      return res.status(401).json({ error: 'Invalid Google token' });
+    }
+
+    if (!payload || !payload.email || !payload.email_verified) {
+      return res.status(401).json({ error: 'Google account email not verified' });
+    }
+
+    const email = String(payload.email).trim().toLowerCase();
+    const domain = email.split('@')[1] || '';
+    const allowed = getAllowedDomains();
+    if (!allowed.includes(domain)) {
+      return res.status(403).json({ error: `Sign-in restricted to: ${allowed.join(', ')}` });
+    }
+
+    const db = getDb();
+    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+
+    if (user) {
+      if (!user.is_active) return res.status(403).json({ error: 'Account is deactivated' });
+      // Link Google ID on first Google sign-in for an existing local account
+      if (!user.google_id) {
+        db.prepare(`UPDATE users SET google_id = ?, updated_at = datetime('now') WHERE id = ?`)
+          .run(payload.sub, user.id);
+      }
+    } else {
+      const userId = uuidv4();
+      const firstName = payload.given_name || (payload.name || email.split('@')[0]).split(' ')[0] || 'User';
+      const lastName = payload.family_name || (payload.name || '').split(' ').slice(1).join(' ') || '';
+      const role = process.env.GOOGLE_DEFAULT_ROLE || 'Standard User';
+      // Unusable password hash so password-login can never succeed for Google-only accounts
+      const unusableHash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10);
+
+      db.prepare(`
+        INSERT INTO users (id, email, password, first_name, last_name, role, avatar, auth_provider, google_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'google', ?)
+      `).run(userId, email, unusableHash, firstName, lastName, role, payload.picture || null, payload.sub);
+
+      await flushSnapshotNow();
+      user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    }
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        is_active: user.is_active,
+      },
+    });
+  } catch (err) {
+    console.error('[Auth] Google sign-in error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

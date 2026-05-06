@@ -435,6 +435,17 @@ async function initializeDatabase() {
     try { db.exec(`ALTER TABLE bug_attachments ADD COLUMN data BLOB`); } catch (e) { console.error('migration data BLOB', e.message); }
   }
 
+  // Google OAuth fields on users
+  const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+  if (!userCols.includes('auth_provider')) {
+    try { db.exec(`ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'`); }
+    catch (e) { console.error('migration auth_provider', e.message); }
+  }
+  if (!userCols.includes('google_id')) {
+    try { db.exec(`ALTER TABLE users ADD COLUMN google_id TEXT`); }
+    catch (e) { console.error('migration google_id', e.message); }
+  }
+
   // Reporting fields on activity_updates: progress %, remarks, next action
   const actCols = db.prepare("PRAGMA table_info(activity_updates)").all().map(c => c.name);
   const addActCol = (name, type) => {
