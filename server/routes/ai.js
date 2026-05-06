@@ -704,16 +704,28 @@ function callGeminiModel(apiKey, model, systemPrompt, userPrompt) {
 async function generateWithGemini(systemPrompt, userPrompt) {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-  // Try models in order — fall through on 404/429 (model unavailable or out of quota)
+  // Try models in order. Fall through on:
+  //   404 — model name not available for this key
+  //   429 — out of quota for that model
+  //   500/502/503/504 — Gemini transient server error / overload
+  const RETRY_CODES = new Set([404, 429, 500, 502, 503, 504]);
   const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
   let lastErr = null;
   for (const model of models) {
-    try {
-      return await callGeminiModel(apiKey, model, systemPrompt, userPrompt);
-    } catch (err) {
-      lastErr = err;
-      if (err.statusCode === 404 || err.statusCode === 429) continue;
-      throw err;
+    // Two attempts per model: handles a single transient blip without giving up the model entirely.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callGeminiModel(apiKey, model, systemPrompt, userPrompt);
+      } catch (err) {
+        lastErr = err;
+        if (!RETRY_CODES.has(err.statusCode)) throw err;
+        // Small backoff before the second attempt on the same model
+        if (attempt === 0 && (err.statusCode === 503 || err.statusCode === 500 || err.statusCode === 502 || err.statusCode === 504)) {
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        }
+        break; // move on to next model
+      }
     }
   }
   throw lastErr || new Error('All Gemini models failed');
