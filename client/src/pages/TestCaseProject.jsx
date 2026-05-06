@@ -122,6 +122,7 @@ export default function TestCaseProject() {
     preconditions: '',
     steps: '',
     expected_result: '',
+    actual_result: '',
     priority: 'Medium',
     severity: 'Major',
     case_type: 'Positive',
@@ -215,6 +216,7 @@ export default function TestCaseProject() {
       preconditions: '',
       steps: '',
       expected_result: '',
+      actual_result: '',
       priority: 'Medium',
       severity: 'Major',
       case_type: 'Positive',
@@ -934,6 +936,22 @@ export default function TestCaseProject() {
                 onChange={e => setCaseForm({ ...caseForm, expected_result: e.target.value })}
                 className="input"
                 placeholder="User lands on the dashboard"
+              />
+            </div>
+
+            <div>
+              <label className="label">
+                Actual Result
+                <span className="ml-2 text-[10px] font-normal text-ink-500">
+                  Leave empty — fill in after running the test
+                </span>
+              </label>
+              <textarea
+                rows={2}
+                value={caseForm.actual_result}
+                onChange={e => setCaseForm({ ...caseForm, actual_result: e.target.value })}
+                className="input"
+                placeholder="To be filled by the tester after execution"
               />
             </div>
 

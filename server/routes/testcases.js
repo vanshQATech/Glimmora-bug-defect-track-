@@ -324,7 +324,7 @@ router.post('/cases', authenticate, upload.array('attachments', 10), isProjectMe
   try {
     const {
       scenario_id, project_id, title, description, preconditions, steps,
-      expected_result, priority, severity, case_type, assignee_id,
+      expected_result, actual_result, priority, severity, case_type, assignee_id,
     } = req.body;
 
     if (!scenario_id || !project_id || !title) {
@@ -339,12 +339,13 @@ router.post('/cases', authenticate, upload.array('attachments', 10), isProjectMe
     db.prepare(`
       INSERT INTO test_cases (
         id, tc_number, scenario_id, project_id, title, description, preconditions, steps,
-        expected_result, priority, severity, case_type, assignee_id, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        expected_result, actual_result, priority, severity, case_type, assignee_id, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, tcNumber, scenario_id, project_id, title,
       description || '', preconditions || '', steps || '',
-      expected_result || '', priority || 'Medium', severity || 'Major',
+      expected_result || '', actual_result || '',
+      priority || 'Medium', severity || 'Major',
       case_type || 'Positive', assignee_id || null, req.user.id
     );
 

@@ -664,7 +664,8 @@ const FILL_TC_SYSTEM = `You are a QA engineer. The user will describe a single t
   "severity": "Critical|Major|Minor|Trivial",
   "case_type": "Positive|Negative|Edge"
 }
-Be thorough — steps should be detailed enough for a tester to follow without guessing.`;
+Be thorough — steps should be detailed enough for a tester to follow without guessing.
+DO NOT include an "actual_result" field. Actual result is recorded by the human tester after they run the test, not by you.`;
 
 function callGeminiModel(apiKey, model, systemPrompt, userPrompt) {
   const https = require('https');
