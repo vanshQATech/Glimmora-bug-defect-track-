@@ -283,11 +283,21 @@ router.put('/:id', authenticate, (req, res) => {
       db.prepare(`UPDATE bugs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
     }
 
+    // Track every recipient we've already emailed in this request so a single
+    // user can't get the same bug update twice (e.g. new assignee + reporter,
+    // new assignee + PM fanout, etc.).
+    const notified = new Set([req.user.id]);
+    const safeNotify = (userId, ...args) => {
+      if (!userId || notified.has(userId)) return;
+      notified.add(userId);
+      notifyUser(db, userId, ...args);
+    };
+
     // Notify on assignment change
     const newAssignee = req.body.assignee_id;
-    if (newAssignee && newAssignee !== existing.assignee_id && newAssignee !== req.user.id) {
+    if (newAssignee && newAssignee !== existing.assignee_id) {
       const assigner = `${req.user.first_name} ${req.user.last_name}`;
-      notifyUser(db, newAssignee, 'bug_assigned', `Bug #${existing.bug_number} Assigned to You`,
+      safeNotify(newAssignee, 'bug_assigned', `Bug #${existing.bug_number} Assigned to You`,
         `${assigner} has assigned bug #${existing.bug_number} — "${existing.summary}" to you. Click "View Bug" to open it and see the full details.`,
         'bug', req.params.id, reqBaseUrl(req));
     }
@@ -298,20 +308,15 @@ router.put('/:id', authenticate, (req, res) => {
       const actor = `${req.user.first_name} ${req.user.last_name}`;
       const statusMsg = `${actor} changed bug #${existing.bug_number} — "${existing.summary}" status from ${existing.status} to ${newStatus}.`;
 
-      if (existing.reporter_id !== req.user.id) {
-        notifyUser(db, existing.reporter_id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
-      }
+      safeNotify(existing.reporter_id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
 
       // Notify all active Project Managers
       try {
         const pms = db.prepare(
           `SELECT id FROM users WHERE role = 'Project Manager' AND is_active = 1`
         ).all();
-        const notified = new Set([req.user.id, existing.reporter_id]);
         for (const pm of pms) {
-          if (notified.has(pm.id)) continue;
-          notifyUser(db, pm.id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
-          notified.add(pm.id);
+          safeNotify(pm.id, 'status_change', `Bug #${existing.bug_number} Status Updated`, statusMsg, 'bug', req.params.id, reqBaseUrl(req));
         }
       } catch (e) { console.error('PM status-change notify failed:', e.message); }
     }

@@ -74,7 +74,9 @@ if (fs.existsSync(clientIndex)) {
   });
 }
 
-// Send due-date reminder emails for bugs due today
+// Send due-date reminder emails for bugs due today.
+// Dedupe via bug_reminder_log so server restarts within the same day
+// (common on Render's spin-down/spin-up cycle) don't fan out duplicate emails.
 async function sendDueDateReminders() {
   try {
     const db = getDb();
@@ -92,16 +94,28 @@ async function sendDueDateReminders() {
     const { sendNotificationEmail } = require('./utils/mailer');
     const appUrl = process.env.APP_URL || 'https://defectx.glimmora.ai';
 
+    const wasSent = db.prepare('SELECT 1 FROM bug_reminder_log WHERE bug_id = ? AND reminder_date = ?');
+    const markSent = db.prepare('INSERT OR IGNORE INTO bug_reminder_log (bug_id, reminder_date) VALUES (?, ?)');
+
     for (const bug of dueBugs) {
-      await sendNotificationEmail({
-        to: bug.assignee_email,
-        subject: `Due Today: Bug #${bug.bug_number} — "${bug.summary}"`,
-        message: `Hi ${bug.assignee_first}, bug #${bug.bug_number} — "<strong>${bug.summary}</strong>" is due today and is currently <strong>${bug.status}</strong>. Please update its status or resolve it.`,
-        entityType: 'bug',
-        entityId: bug.id,
-        baseUrl: appUrl,
-      });
-      console.log(`[DueDate] Reminder sent to ${bug.assignee_email} for bug #${bug.bug_number}`);
+      if (wasSent.get(bug.id, today)) {
+        continue;
+      }
+      // Mark BEFORE awaiting the send so a concurrent boot can't sneak through.
+      markSent.run(bug.id, today);
+      try {
+        await sendNotificationEmail({
+          to: bug.assignee_email,
+          subject: `Due Today: Bug #${bug.bug_number} — "${bug.summary}"`,
+          message: `Hi ${bug.assignee_first}, bug #${bug.bug_number} — "<strong>${bug.summary}</strong>" is due today and is currently <strong>${bug.status}</strong>. Please update its status or resolve it.`,
+          entityType: 'bug',
+          entityId: bug.id,
+          baseUrl: appUrl,
+        });
+        console.log(`[DueDate] Reminder sent to ${bug.assignee_email} for bug #${bug.bug_number}`);
+      } catch (sendErr) {
+        console.error(`[DueDate] Send failed for bug #${bug.bug_number}:`, sendErr.message);
+      }
     }
   } catch (err) {
     console.error('[DueDate] Reminder check failed:', err.message);

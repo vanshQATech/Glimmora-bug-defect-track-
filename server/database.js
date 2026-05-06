@@ -406,6 +406,13 @@ async function initializeDatabase() {
       uploaded_by TEXT NOT NULL,
       uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS bug_reminder_log (
+      bug_id TEXT NOT NULL,
+      reminder_date TEXT NOT NULL,
+      sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (bug_id, reminder_date)
+    );
   `);
 
   // Migration: add case_type if missing
