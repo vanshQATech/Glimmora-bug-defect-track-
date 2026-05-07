@@ -13,9 +13,20 @@ export default function UsersPage() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteStatus, setInviteStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   const fetchUsers = () => {
-    api.get('/users').then(r => setUsers(r.data)).catch(console.error).finally(() => setLoading(false));
+    setFetchError(null);
+    setLoading(true);
+    api.get('/users')
+      .then(r => setUsers(Array.isArray(r.data) ? r.data : []))
+      .catch(err => {
+        console.error('GET /users failed:', err);
+        const status = err.response?.status;
+        const msg = err.response?.data?.error || err.message || 'Network error';
+        setFetchError(`Couldn't load users (${status || 'no response'}): ${msg}`);
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { fetchUsers(); }, []);
@@ -116,13 +127,27 @@ export default function UsersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-ink-900">Users</h1>
-          <p className="text-ink-500 mt-1">{users.length} registered users</p>
+          <p className="text-ink-500 mt-1">
+            {loading ? 'Loading…' : fetchError ? 'Failed to load' : `${users.length} registered users`}
+          </p>
         </div>
         <button onClick={() => setShowInvite(true)}
           className="flex items-center gap-2 px-4 py-2.5 bg-brand-gradient text-white rounded-lg  text-sm font-medium">
           <UserPlus className="w-4 h-4" /> Invite User
         </button>
       </div>
+
+      {fetchError && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-start justify-between gap-4">
+          <div>
+            <div className="font-medium">{fetchError}</div>
+            <div className="text-xs mt-1 opacity-80">Open DevTools → Network → reload to inspect the /api/users response. The server may still be redeploying.</div>
+          </div>
+          <button onClick={fetchUsers} className="px-3 py-1.5 bg-white border border-red-200 rounded text-xs font-medium hover:bg-red-100">
+            Retry
+          </button>
+        </div>
+      )}
 
       {showInvite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { if (!inviteLoading) { setShowInvite(false); setInviteStatus(null); } }}>
